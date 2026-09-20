@@ -180,7 +180,12 @@ class ImageRenamerApp:
         self.pattern_var = tk.StringVar(value=self.profile.filename_template)
         pattern_entry = ttk.Entry(side, textvariable=self.pattern_var)
         pattern_entry.pack(fill="x")
-        pattern_entry.bind("<KeyRelease>", lambda e: (self._update_sample_name(), self._invalidate_preview()))
+        # Only a cheap syntax check on every keystroke -- no OCR. Building
+        # the actual sample re-crops and re-OCRs every field, which used to
+        # run on every single keystroke and made typing a pattern visibly
+        # lag once there were more than a couple of fields. The real sample
+        # is only computed when the operator clicks Preview, below.
+        pattern_entry.bind("<KeyRelease>", lambda e: (self._check_template_syntax(), self._invalidate_preview()))
 
         ttk.Label(side, text="(click a field below to insert its placeholder)").pack(anchor="w")
         insert_frame = ttk.Frame(side)
@@ -189,9 +194,12 @@ class ImageRenamerApp:
         self.insert_listbox.pack(fill="x")
         self.insert_listbox.bind("<<ListboxSelect>>", self._insert_placeholder)
 
-        ttk.Label(side, text="Sample filename:").pack(anchor="w", pady=(16, 0))
-        self.sample_name_var = tk.StringVar(value="")
-        ttk.Label(side, textvariable=self.sample_name_var, foreground="#2a7").pack(anchor="w")
+        sample_row = ttk.Frame(side)
+        sample_row.pack(fill="x", pady=(16, 0))
+        ttk.Label(sample_row, text="Sample filename:").pack(side="left")
+        ttk.Button(sample_row, text="Preview", command=self._update_sample_name).pack(side="left", padx=6)
+        self.sample_name_var = tk.StringVar(value="(click Preview to run OCR on the example image)")
+        ttk.Label(side, textvariable=self.sample_name_var, foreground="#2a7", wraplength=300).pack(anchor="w")
 
         ttk.Label(side, text="Collision strategy:").pack(anchor="w", pady=(16, 0))
         self.collision_var = tk.StringVar(value=self.profile.collision_strategy)
@@ -486,7 +494,7 @@ class ImageRenamerApp:
         else:
             self.profile.fields[target].rect = clamped
         self._redraw_regions()
-        self._update_sample_name()
+        self._check_template_syntax()
         self._invalidate_preview()
 
     def _reset_drag_state(self):
@@ -567,7 +575,7 @@ class ImageRenamerApp:
             self.pattern_var.set(self.pattern_var.get().replace(f"{{{old_name}}}", f"{{{f.name}}}"))
         self._refresh_field_list()
         self._redraw_regions()
-        self._update_sample_name()
+        self._check_template_syntax()
         self._invalidate_preview()
 
     def _delete_selected_field(self):
@@ -585,7 +593,21 @@ class ImageRenamerApp:
             return
         name = self.insert_listbox.get(selection[0])
         self.pattern_var.set(self.pattern_var.get() + f"{{{name}}}")
-        self._update_sample_name()
+        self._check_template_syntax()
+
+    def _check_template_syntax(self):
+        """Cheap, no-OCR check run on every keystroke/edit: just confirms
+        the template's placeholders are all known fields. The actual
+        sample filename (which requires cropping and OCR-ing every field
+        against the example image) is only computed when the operator
+        clicks Preview -- see _update_sample_name."""
+        template = self.pattern_var.get()
+        try:
+            naming.validate_template(template, self.profile.field_names())
+        except naming.TemplateError as exc:
+            self.sample_name_var.set(f"Invalid: {exc}")
+            return
+        self.sample_name_var.set("(click Preview to run OCR on the example image)")
 
     def _update_sample_name(self):
         template = self.pattern_var.get()
