@@ -46,14 +46,28 @@ jobs:
             --paths . \
             image_renamer/app.py
 
-      - name: Package
-        # ditto (not zip) preserves the .app bundle structure correctly.
-        run: ditto -c -k --sequesterRsrc --keepParent dist/ImageRenamer.app ImageRenamer-mac.zip
-
+      # Upload the raw .app bundle, not a zip of it: actions/upload-artifact
+      # already wraps whatever it's given in its own zip on download, so
+      # zipping the bundle ourselves first produced a zip-inside-a-zip that
+      # confused Archive Utility on extraction (extracting the GitHub
+      # wrapper just dropped our already-zipped file into Downloads,
+      # colliding with any earlier download and needing a second manual
+      # extraction). actions/upload-artifact preserves directory structure
+      # and permissions in its own zip, so this still reconstructs a
+      # working .app on download -- one extraction, done.
       - uses: actions/upload-artifact@v4
         with:
           name: ImageRenamer-mac
-          path: ImageRenamer-mac.zip
+          path: dist/ImageRenamer.app
+
+      - name: Package for release
+        # A GitHub Release asset has to be a single file, so the .app
+        # (a directory) needs zipping here -- but only here, for the
+        # release upload, not for the workflow artifact above. ditto
+        # (rather than the `zip` command) preserves the bundle's resource
+        # forks and metadata correctly.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: ditto -c -k --sequesterRsrc --keepParent dist/ImageRenamer.app ImageRenamer-mac.zip
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')

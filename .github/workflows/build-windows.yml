@@ -41,18 +41,21 @@ jobs:
             --paths . `
             image_renamer/app.py
 
-      - name: Package
-        run: Compress-Archive -Path dist/ImageRenamer.exe -DestinationPath ImageRenamer-windows.zip
-
+      # Upload the raw .exe, not a zip of it: actions/upload-artifact
+      # already wraps whatever it's given in its own zip on download, so
+      # zipping it ourselves first produced a zip-inside-a-zip that
+      # confused Archive Utility on extraction. A bare .exe is also a
+      # perfectly valid GitHub Release asset, so no zip is needed there
+      # either.
       - uses: actions/upload-artifact@v4
         with:
           name: ImageRenamer-windows
-          path: ImageRenamer-windows.zip
+          path: dist/ImageRenamer.exe
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ImageRenamer-windows.zip
+          files: dist/ImageRenamer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
