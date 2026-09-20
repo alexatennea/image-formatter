@@ -55,13 +55,22 @@ jobs:
       # confused Archive Utility on extraction (extracting the GitHub
       # wrapper just dropped our already-zipped file into Downloads,
       # colliding with any earlier download and needing a second manual
-      # extraction). actions/upload-artifact preserves directory structure
-      # and permissions in its own zip, so this still reconstructs a
-      # working .app on download -- one extraction, done.
+      # extraction).
+      #
+      # `path: dist` (the app's PARENT folder), not `dist/ImageRenamer.app`
+      # directly -- actions/upload-artifact flattens a single directory's
+      # CONTENTS into the artifact root rather than keeping the directory
+      # itself. Pointing it straight at the bundle stripped the
+      # "ImageRenamer.app" folder name entirely, so Finder had nothing
+      # named *.app to recognise and just showed the bundle's raw
+      # Contents/Resources/etc. as an ordinary folder instead of a
+      # double-clickable application. Uploading the parent folder instead
+      # means the flattening happens one level up, so "ImageRenamer.app"
+      # itself survives as a real top-level folder in the download.
       - uses: actions/upload-artifact@v4
         with:
           name: ImageRenamer-mac
-          path: dist/ImageRenamer.app
+          path: dist
 
       - name: Package for release
         # A GitHub Release asset has to be a single file, so the .app
