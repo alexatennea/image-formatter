@@ -2,12 +2,15 @@ name: Build Windows executable
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
   workflow_dispatch: {}
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   build:
@@ -59,3 +62,26 @@ jobs:
           files: dist/ImageRenamer.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Workflow artifacts (unlike Release assets) pile up forever
+      # otherwise -- every push to main uploads a new one under the same
+      # name, so keep only the 3 most recent and delete the rest.
+      - name: Prune old artifacts (keep newest 3)
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const artifactName = "ImageRenamer-windows";
+            const all = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 },
+            );
+            const matching = all
+              .filter((a) => a.name === artifactName)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            for (const artifact of matching.slice(3)) {
+              console.log(`Deleting old artifact ${artifact.id} (${artifact.created_at})`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner, repo: context.repo.repo, artifact_id: artifact.id,
+              });
+            }

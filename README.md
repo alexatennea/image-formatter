@@ -45,18 +45,21 @@ suppresses the console window on Windows.
 each run tests then build on their native OS (PyInstaller doesn't
 cross-compile).
 
-- **Manual run**: Actions tab -> pick the workflow -> Run workflow. The
-  build is attached to that run as a downloadable artifact
-  (`ImageRenamer-windows`, containing `ImageRenamer.exe`; `ImageRenamer-mac`,
-  containing `ImageRenamer.app`). GitHub always wraps a workflow artifact in
-  its own zip on download -- extract that once and the `.exe`/`.app` is
-  right there; no second zip to unpack.
+- **Every push to `main`**, and **manual run** (Actions tab -> pick the
+  workflow -> Run workflow): the build is attached to that run as a
+  downloadable artifact (`ImageRenamer-windows`, containing
+  `ImageRenamer.exe`; `ImageRenamer-mac`, containing `ImageRenamer.app`).
+  GitHub always wraps a workflow artifact in its own zip on download --
+  extract that once and the `.exe`/`.app` is right there; no second zip to
+  unpack. Only the 3 most recent artifacts of each are kept; each workflow
+  run prunes older ones under the same name.
 - **Release**: push a tag matching `v*.*.*` (e.g. `git tag v1.0.0 && git
   push origin v1.0.0`) and both workflows also attach a build to a GitHub
   Release for that tag (the Windows `.exe` directly, the macOS `.app`
   zipped since a Release asset has to be a single file), so others can
   download it from the Releases page without needing repo access to
-  Actions.
+  Actions. Release assets are not pruned -- only the plain workflow-run
+  artifacts are.
 
 Neither build is code-signed, so first launch will trigger a Windows
 SmartScreen warning or a macOS Gatekeeper warning ("unidentified
