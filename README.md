@@ -30,6 +30,7 @@ Build on the target OS -- PyInstaller does not cross-compile.
 
 ```bash
 pyinstaller --onefile --windowed --name ImageRenamer \
+  --icon assets/icon.ico \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
@@ -37,7 +38,10 @@ pyinstaller --onefile --windowed --name ImageRenamer \
 
 `--collect-data` is required or the bundled OCR models are omitted and the
 app fails at first extraction with a missing-file error. `--windowed`
-suppresses the console window on Windows.
+suppresses the console window on Windows. `--icon` only applies on Windows
+(PyInstaller ignores it elsewhere); macOS reads its own `.app` bundle icon
+separately (not yet set up -- `assets/icon.ico` would need converting to a
+`.icns` first).
 
 ### CI builds
 
