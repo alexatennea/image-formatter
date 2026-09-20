@@ -11,10 +11,19 @@ on:
 permissions:
   contents: write
   actions: write
+  id-token: write
 
 jobs:
   build:
     runs-on: windows-latest
+    # Scopes the GitHub OIDC token's subject to
+    # "repo:alexatennea/image-formatter:environment:release" regardless of
+    # which ref triggered the run (push to main, any version tag, or a
+    # manual dispatch) -- Azure federated credentials need an exact subject
+    # match with no wildcards, and tag names vary per release, so an
+    # environment (rather than a per-branch/per-tag credential) is what
+    # lets one federated credential cover all of them.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -44,6 +53,24 @@ jobs:
             --collect-data rapidocr_onnxruntime `
             --paths . `
             image_renamer/app.py
+
+      - name: Sign executable (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          # OIDC federated auth -- no client secret stored anywhere. This
+          # job's `environment: release` above is what makes the token's
+          # subject match the federated credential configured on the
+          # Entra ID app (repo:alexatennea/image-formatter:environment:release).
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: ennealimited
+          certificate-profile-name: image-renamer
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
 
       # Upload the raw .exe, not a zip of it: actions/upload-artifact
       # already wraps whatever it's given in its own zip on download, so

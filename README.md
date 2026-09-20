@@ -89,10 +89,32 @@ cross-compile).
   Actions. Release assets are not pruned -- only the plain workflow-run
   artifacts are.
 
-Neither build is code-signed, so first launch will trigger a Windows
-SmartScreen warning or a macOS Gatekeeper warning ("unidentified
-developer"); this is expected without a paid signing certificate. On
-macOS, right-click the app -> Open the first time to bypass it.
+The Windows `.exe` is code-signed via Azure Trusted Signing (see below) --
+SmartScreen reputation still builds up gradually after release, so early
+downloads may briefly show a warning regardless. The macOS build is not
+signed/notarized, so it will trigger a Gatekeeper warning ("unidentified
+developer"); right-click the app -> Open the first time to bypass it.
+
+### Windows code signing
+
+Signed via [Azure Trusted Signing](https://azure.microsoft.com/en-us/products/trusted-signing),
+using OIDC federation -- no certificate or client secret is stored in the
+repo. `build-windows.yml`'s job runs under the `release` GitHub
+environment and authenticates to Azure as the `github-image-renamer-signing`
+Entra ID app, which is granted the "Artifact Signing Certificate Profile
+Signer" role scoped only to the `image-renamer` certificate profile under
+the `ennealimited` Trusted Signing account (resource group
+`software-signing`, West Europe). The environment (rather than a
+branch/tag-scoped federated credential) is what lets one credential cover
+every trigger -- push to main, any version tag, or a manual run -- since
+Azure federated credentials require an exact subject match and tag names
+vary per release.
+
+Repo variables `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`
+hold the (non-secret) identifiers the workflow needs; nothing else is
+required to rotate or reproduce this setup beyond those three values plus
+the certificate profile name and endpoint already hardcoded in the
+workflow.
 
 ## Module boundaries
 
