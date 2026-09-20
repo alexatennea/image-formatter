@@ -54,13 +54,29 @@ jobs:
             --paths . `
             image_renamer/app.py
 
+      - name: Azure login (OIDC)
+        # azure/trusted-signing-action doesn't perform the GitHub OIDC
+        # token exchange itself -- it authenticates via .NET's
+        # DefaultAzureCredential, which only picks up a federated identity
+        # from the environment/token-cache a prior login step leaves
+        # behind. Without this step it fell through Environment,
+        # WorkloadIdentity and ManagedIdentity credentials and failed with
+        # "Identity not found". No client-secret here: azure/login uses
+        # OIDC automatically given `id-token: write` permission (above)
+        # and no secret input.
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
       - name: Sign executable (Azure Trusted Signing)
         uses: azure/trusted-signing-action@v0.5.1
         with:
-          # OIDC federated auth -- no client secret stored anywhere. This
-          # job's `environment: release` above is what makes the token's
-          # subject match the federated credential configured on the
-          # Entra ID app (repo:alexatennea/image-formatter:environment:release).
+          # This job's `environment: release` (above) is what makes the
+          # OIDC token's subject match the federated credential configured
+          # on the Entra ID app
+          # (repo:alexatennea/image-formatter:environment:release).
           azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
           azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
           endpoint: https://weu.codesigning.azure.net/
