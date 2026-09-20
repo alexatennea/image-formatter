@@ -670,7 +670,21 @@ class ImageRenamerApp:
     # -- run tab logic ---------------------------------------------------
 
     def choose_folder(self):
-        folder = filedialog.askdirectory(title="Choose a folder of images")
+        # Batches typically live next to (or ARE) the folder the example
+        # image was loaded from, so start the picker there rather than
+        # wherever the OS last remembers -- the operator can then usually
+        # just confirm the folder, or step up one level to a sibling batch.
+        initial_dir = None
+        current = self.folder_var.get()
+        if current and os.path.isdir(current):
+            initial_dir = os.path.dirname(current) or current
+        elif self.example_path:
+            initial_dir = os.path.dirname(self.example_path)
+
+        kwargs = {"title": "Choose a folder of images"}
+        if initial_dir and os.path.isdir(initial_dir):
+            kwargs["initialdir"] = initial_dir
+        folder = filedialog.askdirectory(**kwargs)
         if not folder:
             return
         self.folder_var.set(folder)
