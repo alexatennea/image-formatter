@@ -81,7 +81,7 @@ jobs:
           azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
           endpoint: https://weu.codesigning.azure.net/
           trusted-signing-account-name: ennealimited
-          certificate-profile-name: image-renamer
+          certificate-profile-name: ennea
           files-folder: ${{ github.workspace }}\dist
           files-folder-filter: exe
           file-digest: SHA256

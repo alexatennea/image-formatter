@@ -102,13 +102,18 @@ using OIDC federation -- no certificate or client secret is stored in the
 repo. `build-windows.yml`'s job runs under the `release` GitHub
 environment and authenticates to Azure as the `github-image-renamer-signing`
 Entra ID app, which is granted the "Artifact Signing Certificate Profile
-Signer" role scoped only to the `image-renamer` certificate profile under
-the `ennealimited` Trusted Signing account (resource group
-`software-signing`, West Europe). The environment (rather than a
-branch/tag-scoped federated credential) is what lets one credential cover
-every trigger -- push to main, any version tag, or a manual run -- since
-Azure federated credentials require an exact subject match and tag names
-vary per release.
+Signer" role scoped only to the `ennea` certificate profile under the
+`ennealimited` Trusted Signing account (resource group `software-signing`,
+West Europe). The environment (rather than a branch/tag-scoped federated
+credential) is what lets one credential cover every trigger -- push to
+main, any version tag, or a manual run -- since Azure federated
+credentials require an exact subject match and tag names vary per release.
+
+The certificate profile identifies the *publisher* (Ennea Limited), not
+this specific app, so it's shared across whatever else gets signed this
+way -- Trusted Signing's Basic tier only allows one certificate profile
+per account, so this is also a hard constraint, not just a tidiness
+choice.
 
 Repo variables `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_SUBSCRIPTION_ID`
 hold the (non-secret) identifiers the workflow needs; nothing else is
