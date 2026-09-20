@@ -1,0 +1,55 @@
+# Image Batch Renamer
+
+Local desktop app that renames folders of photos using text printed on the
+images, driven by a reusable template. No network access; OCR runs fully
+on-device via RapidOCR (ONNX). See the build spec for full rationale.
+
+## Development
+
+Requires Python 3.11 or 3.12 (PyInstaller and the ONNX runtime wheel tend
+to lag the newest CPython release).
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m image_renamer.app
+```
+
+## Tests
+
+Unit tests need no display and no OCR install:
+
+```bash
+python -m pytest tests/
+```
+
+## Packaging
+
+Build on the target OS -- PyInstaller does not cross-compile.
+
+```bash
+pyinstaller --onefile --windowed --name ImageRenamer \
+  --collect-data rapidocr_onnxruntime \
+  -p . \
+  image_renamer/app.py
+```
+
+`--collect-data` is required or the bundled OCR models are omitted and the
+app fails at first extraction with a missing-file error. `--windowed`
+suppresses the console window on Windows.
+
+## Module boundaries
+
+| Module | Responsibility | Imports GUI? |
+| --- | --- | --- |
+| `image_renamer/profile.py` | Profile dataclasses, load, save, version check | No |
+| `image_renamer/geometry.py` | Coordinate conversion, padding, layout guard | No |
+| `image_renamer/extract.py` | Crop, preprocess, OCR call, postprocess, validate | No |
+| `image_renamer/naming.py` | Template resolution, sanitisation, collisions | No |
+| `image_renamer/runner.py` | Folder scan, hashing, orchestration, manifest, undo | No |
+| `image_renamer/app.py` | Tkinter windows, canvas, dialogs, wiring | Yes |
+
+`runner.preview(folder, profile)` and `runner.apply(rows, folder, profile_name)`
+are the only entry points the GUI calls into batch logic, plus
+`runner.undo_last_run(folder)`.
