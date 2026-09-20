@@ -13,8 +13,8 @@ from typing import Optional
 
 from PIL import Image, ImageTk
 
-from . import extract, geometry, naming, runner
-from .profile import Field, LayoutGuard, Profile, ProfileError, ReferenceImage, default_profiles_dir
+from image_renamer import extract, geometry, naming, runner
+from image_renamer.profile import Field, LayoutGuard, Profile, ProfileError, ReferenceImage, default_profiles_dir
 
 MAX_DISPLAY_DIM = 900
 

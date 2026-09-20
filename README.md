@@ -26,22 +26,41 @@ python -m pytest tests/
 
 ## Packaging
 
-Build on the target OS -- PyInstaller does not cross-compile.
+Build on the target OS -- PyInstaller does not cross-compile. The exact
+commands the CI workflows run are the source of truth (see below); roughly:
 
 ```bash
+# Windows
 pyinstaller --onefile --windowed --name ImageRenamer \
   --icon assets/icon.ico \
+  --collect-data rapidocr_onnxruntime \
+  -p . \
+  image_renamer/app.py
+
+# macOS -- no --onefile: PyInstaller warns that combining --onefile with
+# --windowed on macOS "clashes with macOS's security" and is slated to
+# become a hard error. --windowed alone still produces a proper .app
+# bundle; --onefile only controls whether its *internals* are one big
+# self-extracting binary or a plain directory of files.
+pyinstaller --windowed --name ImageRenamer \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
 ```
 
 `--collect-data` is required or the bundled OCR models are omitted and the
-app fails at first extraction with a missing-file error. `--windowed`
-suppresses the console window on Windows. `--icon` only applies on Windows
-(PyInstaller ignores it elsewhere); macOS reads its own `.app` bundle icon
-separately (not yet set up -- `assets/icon.ico` would need converting to a
-`.icns` first).
+app fails at first extraction with a missing-file error. `--icon` only
+applies on Windows (PyInstaller ignores it elsewhere); macOS reads its own
+`.app` bundle icon separately (not yet set up -- `assets/icon.ico` would
+need converting to a `.icns` first).
+
+`image_renamer/app.py` imports its sibling modules with absolute imports
+(`from image_renamer import extract, ...`), not relative ones (`from . import
+...`) -- PyInstaller runs the frozen entry script without any package
+context, so a relative import there fails at startup with `ImportError:
+attempted relative import with no known parent package`. This only shows up
+in the frozen build, not in normal `python -m image_renamer.app` runs, so
+it's easy to miss locally.
 
 ### CI builds
 

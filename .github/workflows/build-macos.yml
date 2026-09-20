@@ -43,8 +43,15 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Build app bundle
+        # No --onefile here (unlike the Windows build): PyInstaller warns
+        # that --onefile combined with --windowed on macOS "clashes with
+        # macOS's security" and is slated to become a hard error, since a
+        # .app bundle can't itself be a single file anyway -- --windowed
+        # always produces a proper Contents/MacOS/... bundle either way,
+        # this just controls whether its *internals* are one big
+        # self-extracting binary or a plain directory of files.
         run: |
-          pyinstaller --onefile --windowed --name ImageRenamer \
+          pyinstaller --windowed --name ImageRenamer \
             --collect-data rapidocr_onnxruntime \
             --paths . \
             image_renamer/app.py
