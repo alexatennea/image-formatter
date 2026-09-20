@@ -33,7 +33,11 @@ jobs:
         run: python -c "import tkinter; print('tkinter OK, Tk', tkinter.TkVersion)"
 
       - name: Run tests
-        run: pytest tests/ -q
+        # `python -m pytest` (not the bare `pytest` console script) so the
+        # repo root lands on sys.path and `image_renamer` is importable --
+        # tests/ has no __init__.py, so pytest's own rootless import
+        # doesn't add the repo root the way `-m` does.
+        run: python -m pytest tests/ -q
 
       - name: Build app bundle
         run: |
