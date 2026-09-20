@@ -43,16 +43,21 @@ pyinstaller --onefile --windowed --name ImageRenamer \
 # bundle; --onefile only controls whether its *internals* are one big
 # self-extracting binary or a plain directory of files.
 pyinstaller --windowed --name ImageRenamer \
+  --icon assets/icon.icns \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
 ```
 
 `--collect-data` is required or the bundled OCR models are omitted and the
-app fails at first extraction with a missing-file error. `--icon` only
-applies on Windows (PyInstaller ignores it elsewhere); macOS reads its own
-`.app` bundle icon separately (not yet set up -- `assets/icon.ico` would
-need converting to a `.icns` first).
+app fails at first extraction with a missing-file error. Windows takes
+`assets/icon.ico`, macOS takes `assets/icon.icns` -- same artwork
+(`assets/icon_source.png`), exported in each platform's own icon format;
+PyInstaller ignores `--icon` if you pass the wrong format for the target
+OS. `assets/icon.icns` was built with Apple's own `iconutil` from a set of
+rendered PNGs at each required size (16 up to 1024px, `@2x` retina
+variants included) -- see git history for the exact steps if it ever needs
+regenerating.
 
 `image_renamer/app.py` imports its sibling modules with absolute imports
 (`from image_renamer import extract, ...`), not relative ones (`from . import

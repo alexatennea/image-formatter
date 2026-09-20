@@ -52,6 +52,7 @@ jobs:
         # self-extracting binary or a plain directory of files.
         run: |
           pyinstaller --windowed --name ImageRenamer \
+            --icon assets/icon.icns \
             --collect-data rapidocr_onnxruntime \
             --paths . \
             image_renamer/app.py
