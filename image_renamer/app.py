@@ -67,12 +67,15 @@ class ImageRenamerApp:
         self.root = root
         self.root.title("Image Batch Renamer")
         self.root.geometry("1100x700")
+        self.root.minsize(900, 600)
 
         self.profile = self._blank_profile()
         self.example_image: Optional[Image.Image] = None
         self.example_path: Optional[str] = None
         self.display_scale: float = 1.0
         self.tk_image = None
+        self._canvas_resize_job: Optional[str] = None
+        self._wrap_labels: list[ttk.Label] = []
 
         self.drag_start: Optional[tuple[int, int]] = None
         self.drag_rect_id: Optional[int] = None
@@ -132,36 +135,38 @@ class ImageRenamerApp:
         self.profile_name_var = tk.StringVar(value=self.profile.profile_name)
         ttk.Entry(top_bar, textvariable=self.profile_name_var, width=24).pack(side="left")
 
-        body = ttk.Frame(self.template_tab)
+        body = ttk.PanedWindow(self.template_tab, orient="horizontal")
         body.pack(fill="both", expand=True, padx=4, pady=4)
 
-        self.canvas = tk.Canvas(body, bg="#333333", width=MAX_DISPLAY_DIM, height=MAX_DISPLAY_DIM)
-        self.canvas.pack(side="left", fill="both", expand=True)
+        canvas_pane = ttk.Frame(body)
+        self.canvas = tk.Canvas(canvas_pane, bg="#333333", width=MAX_DISPLAY_DIM, height=MAX_DISPLAY_DIM)
+        self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
 
-        side = ttk.Frame(body, width=320)
-        side.pack(side="right", fill="y")
-        side.pack_propagate(False)
+        self.side = ttk.Frame(body)
 
-        ttk.Label(side, text="Fields").pack(anchor="w")
-        self.field_listbox = tk.Listbox(side, height=12)
+        ttk.Label(self.side, text="Fields").pack(anchor="w")
+        self.field_listbox = tk.Listbox(self.side, height=12)
         self.field_listbox.pack(fill="x")
         self.field_listbox.bind("<<ListboxSelect>>", self._on_field_select)
 
-        field_btns = ttk.Frame(side)
+        field_btns = ttk.Frame(self.side)
         field_btns.pack(fill="x", pady=4)
         ttk.Button(field_btns, text="Rename", command=self._rename_selected_field).pack(side="left")
         ttk.Button(field_btns, text="Delete", command=self._delete_selected_field).pack(side="left", padx=4)
-        ttk.Label(
-            side, text="Drag a region's body to move it, a corner to resize it.",
+        drag_hint = ttk.Label(
+            self.side, text="Drag a region's body to move it, a corner to resize it.",
             foreground="#888", wraplength=300,
-        ).pack(anchor="w", pady=(2, 0))
+        )
+        drag_hint.pack(anchor="w", pady=(2, 0))
+        self._wrap_labels.append(drag_hint)
 
-        ttk.Label(side, text="Output crop (optional):").pack(anchor="w", pady=(16, 0))
+        ttk.Label(self.side, text="Output crop (optional):").pack(anchor="w", pady=(16, 0))
         self.draw_mode_var = tk.StringVar(value="field")
-        crop_row = ttk.Frame(side)
+        crop_row = ttk.Frame(self.side)
         crop_row.pack(fill="x")
         ttk.Radiobutton(
             crop_row, text="Draw fields", value="field", variable=self.draw_mode_var,
@@ -169,16 +174,18 @@ class ImageRenamerApp:
         ttk.Radiobutton(
             crop_row, text="Draw output crop", value="crop", variable=self.draw_mode_var,
         ).pack(side="left")
-        ttk.Button(side, text="Clear output crop", command=self._clear_output_crop).pack(anchor="w", pady=(2, 0))
-        ttk.Label(
-            side,
+        ttk.Button(self.side, text="Clear output crop", command=self._clear_output_crop).pack(anchor="w", pady=(2, 0))
+        crop_hint = ttk.Label(
+            self.side,
             text="When set, every processed photo is saved cropped to this\narea under its new name; the untouched original is kept in\nan '_originals' subfolder.",
             foreground="#888", wraplength=300,
-        ).pack(anchor="w")
+        )
+        crop_hint.pack(anchor="w")
+        self._wrap_labels.append(crop_hint)
 
-        ttk.Label(side, text="Filename pattern:").pack(anchor="w", pady=(16, 0))
+        ttk.Label(self.side, text="Filename pattern:").pack(anchor="w", pady=(16, 0))
         self.pattern_var = tk.StringVar(value=self.profile.filename_template)
-        pattern_entry = ttk.Entry(side, textvariable=self.pattern_var)
+        pattern_entry = ttk.Entry(self.side, textvariable=self.pattern_var)
         pattern_entry.pack(fill="x")
         # Only a cheap syntax check on every keystroke -- no OCR. Building
         # the actual sample re-crops and re-OCRs every field, which used to
@@ -187,30 +194,41 @@ class ImageRenamerApp:
         # is only computed when the operator clicks Preview, below.
         pattern_entry.bind("<KeyRelease>", lambda e: (self._check_template_syntax(), self._invalidate_preview()))
 
-        ttk.Label(side, text="(click a field below to insert its placeholder)").pack(anchor="w")
-        insert_frame = ttk.Frame(side)
+        ttk.Label(self.side, text="(click a field below to insert its placeholder)").pack(anchor="w")
+        insert_frame = ttk.Frame(self.side)
         insert_frame.pack(fill="x", pady=4)
         self.insert_listbox = tk.Listbox(insert_frame, height=6)
         self.insert_listbox.pack(fill="x")
         self.insert_listbox.bind("<<ListboxSelect>>", self._insert_placeholder)
 
-        sample_row = ttk.Frame(side)
+        sample_row = ttk.Frame(self.side)
         sample_row.pack(fill="x", pady=(16, 0))
         ttk.Label(sample_row, text="Sample filename:").pack(side="left")
         ttk.Button(sample_row, text="Preview", command=self._update_sample_name).pack(side="left", padx=6)
         self.sample_name_var = tk.StringVar(value="(click Preview to run OCR on the example image)")
-        ttk.Label(side, textvariable=self.sample_name_var, foreground="#2a7", wraplength=300).pack(anchor="w")
+        sample_label = ttk.Label(self.side, textvariable=self.sample_name_var, foreground="#2a7", wraplength=300)
+        sample_label.pack(anchor="w")
+        self._wrap_labels.append(sample_label)
 
-        ttk.Label(side, text="Collision strategy:").pack(anchor="w", pady=(16, 0))
+        ttk.Label(self.side, text="Collision strategy:").pack(anchor="w", pady=(16, 0))
         self.collision_var = tk.StringVar(value=self.profile.collision_strategy)
         collision_combo = ttk.Combobox(
-            side,
+            self.side,
             textvariable=self.collision_var,
             values=["hash_suffix", "sequence"],
             state="readonly",
         )
         collision_combo.pack(fill="x")
         collision_combo.bind("<<ComboboxSelected>>", lambda e: self._invalidate_preview())
+
+        body.add(canvas_pane, weight=3)
+        body.add(self.side, weight=1)
+        # ttk.Panedwindow's pane options only support `weight` (unlike the
+        # older tk.PanedWindow, `minsize` isn't available here) -- the
+        # window-level root.minsize(...) is what keeps the whole layout
+        # from collapsing into unusable clipping; individual panes can
+        # still be dragged narrow by the sash, same as any ttk PanedWindow.
+        self.side.bind("<Configure>", self._on_side_configure)
 
     def _build_run_tab(self):
         top_bar = ttk.Frame(self.run_tab)
@@ -234,19 +252,14 @@ class ImageRenamerApp:
         self.status_line_var = tk.StringVar(value="")
         ttk.Label(self.run_tab, textvariable=self.status_line_var).pack(anchor="w", padx=4)
 
-        body = ttk.Frame(self.run_tab)
+        body = ttk.PanedWindow(self.run_tab, orient="horizontal")
         body.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # The inspector is packed FIRST so it claims its fixed-width slice
-        # of the body frame before the table's `expand=True` claims
-        # everything else -- packing it after the table (as originally
-        # written) starved it down to a near-zero-width sliver once the
-        # table grew enough columns to want more space than the window had.
-        inspector = ttk.Frame(body, width=480)
-        inspector.pack(side="right", fill="y")
-        inspector.pack_propagate(False)
-        ttk.Label(inspector, text="Crop inspector").pack(anchor="w")
-        canvas_frame = ttk.Frame(inspector)
+        table_frame = ttk.Frame(body)
+
+        self.inspector = ttk.Frame(body)
+        ttk.Label(self.inspector, text="Crop inspector").pack(anchor="w")
+        canvas_frame = ttk.Frame(self.inspector)
         canvas_frame.pack(fill="both", expand=True)
         self.inspector_canvas = tk.Canvas(canvas_frame, width=460, height=700, bg="#222222")
         inspector_scroll = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.inspector_canvas.yview)
@@ -258,12 +271,12 @@ class ImageRenamerApp:
             lambda e: self.inspector_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
         )
 
-        self.toggle_frame = ttk.Frame(inspector)
+        self.toggle_frame = ttk.Frame(self.inspector)
         self.toggle_frame.pack(fill="x", pady=4)
         self.toggle_buttons: dict[str, ttk.Button] = {}
 
-        table_frame = ttk.Frame(body)
-        table_frame.pack(side="left", fill="both", expand=True)
+        body.add(table_frame, weight=2)
+        body.add(self.inspector, weight=1)
 
         self.base_columns = ["original", "status", "proposed"]
         self.tree = ttk.Treeview(table_frame, columns=self.base_columns, show="headings", height=20)
@@ -308,18 +321,60 @@ class ImageRenamerApp:
         )
         self._render_canvas_image()
 
+    def _compute_display_scale(self) -> float:
+        """Scale to fit the example image into the canvas's current size
+        (not the fixed MAX_DISPLAY_DIM), so the displayed image actually
+        grows/shrinks as the operator resizes the window or drags the
+        pane's sash, rather than staying locked to whatever size it was
+        loaded at."""
+        if self.example_image is None:
+            return 1.0
+        width, height = self.example_image.size
+        avail_w = max(self.canvas.winfo_width(), 1)
+        avail_h = max(self.canvas.winfo_height(), 1)
+        return min(avail_w / width, avail_h / height, 1.0)
+
     def _render_canvas_image(self):
         if self.example_image is None:
             return
         width, height = self.example_image.size
-        scale = min(MAX_DISPLAY_DIM / width, MAX_DISPLAY_DIM / height, 1.0)
+        scale = self._compute_display_scale()
         self.display_scale = scale
         disp = self.example_image.resize((max(1, round(width * scale)), max(1, round(height * scale))))
         self.tk_image = ImageTk.PhotoImage(disp)
         self.canvas.delete("all")
-        self.canvas.config(width=disp.width, height=disp.height)
+        # No self.canvas.config(width=..., height=...) here -- the canvas
+        # fills its pane (packed with fill="both", expand=True) and keeps
+        # that size; the image is drawn at its scaled size within it, with
+        # any leftover space left as the canvas's own background colour
+        # (letterboxing) rather than the canvas itself being resized to
+        # hug the image exactly.
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_image, tags="bg")
         self._redraw_regions()
+
+    def _on_canvas_configure(self, _event):
+        # <Configure> fires on every intermediate pixel during a live
+        # window/sash drag; debounce so a resize only triggers one PIL
+        # resize + full region redraw ~150ms after the drag settles,
+        # rather than on every frame of the drag.
+        if self._canvas_resize_job is not None:
+            self.root.after_cancel(self._canvas_resize_job)
+        self._canvas_resize_job = self.root.after(150, self._apply_canvas_resize)
+
+    def _apply_canvas_resize(self):
+        self._canvas_resize_job = None
+        if self.drag_start is not None:
+            # A region drag is in progress -- rescaling now would change
+            # display_scale out from under _on_canvas_drag/_on_canvas_release
+            # mid-gesture. Defer until the drag finishes.
+            self._canvas_resize_job = self.root.after(150, self._apply_canvas_resize)
+            return
+        self._render_canvas_image()
+
+    def _on_side_configure(self, event):
+        wrap = max(100, event.width - 20)
+        for label in self._wrap_labels:
+            label.configure(wraplength=wrap)
 
     HANDLE_SIZE = 8
 
@@ -940,10 +995,17 @@ class ImageRenamerApp:
         choice_fields = [f for f in self.profile.fields if f.type == "choice"]
         other_fields = [f for f in self.profile.fields if f.type != "choice"]
 
+        # Cap thumbnails at the numbers below, but shrink them further if
+        # the inspector pane has been dragged narrower than that -- never
+        # upscale past the chosen legible size if the pane is wider.
+        inspector_w = max(self.inspector_canvas.winfo_width(), 200)
+        choice_thumb_max = (min(440, inspector_w - 20), 320)
+        other_thumb_max = (min(240, inspector_w - 20), 60)
+
         y = 5
         for f in choice_fields:
             crop = extract.crop_field(image, f.rect)
-            crop.thumbnail((440, 320))
+            crop.thumbnail(choice_thumb_max)
             tk_crop = ImageTk.PhotoImage(crop)
             self.inspector_canvas.image_refs = getattr(self.inspector_canvas, "image_refs", [])
             self.inspector_canvas.image_refs.append(tk_crop)
@@ -965,7 +1027,7 @@ class ImageRenamerApp:
 
         for f in other_fields:
             crop = extract.crop_field(image, f.rect)
-            crop.thumbnail((240, 60))
+            crop.thumbnail(other_thumb_max)
             tk_crop = ImageTk.PhotoImage(crop)
             self.inspector_canvas.image_refs = getattr(self.inspector_canvas, "image_refs", [])
             self.inspector_canvas.image_refs.append(tk_crop)
@@ -976,7 +1038,7 @@ class ImageRenamerApp:
             )
             y += 90
 
-        self.inspector_canvas.configure(scrollregion=(0, 0, 460, y + 10))
+        self.inspector_canvas.configure(scrollregion=(0, 0, inspector_w, y + 10))
 
     def _toggle_choice_from_inspector(self, field_name: str):
         row = self.current_inspected_row
