@@ -192,7 +192,7 @@ class ImageRenamerApp:
         # run on every single keystroke and made typing a pattern visibly
         # lag once there were more than a couple of fields. The real sample
         # is only computed when the operator clicks Preview, below.
-        pattern_entry.bind("<KeyRelease>", lambda e: (self._check_template_syntax(), self._invalidate_preview()))
+        pattern_entry.bind("<KeyRelease>", lambda e: self._check_template_syntax())
 
         ttk.Label(self.side, text="(click a field below to insert its placeholder)").pack(anchor="w")
         insert_frame = ttk.Frame(self.side)
@@ -219,7 +219,6 @@ class ImageRenamerApp:
             state="readonly",
         )
         collision_combo.pack(fill="x")
-        collision_combo.bind("<<ComboboxSelected>>", lambda e: self._invalidate_preview())
 
         body.add(canvas_pane, weight=3)
         body.add(self.side, weight=1)
@@ -525,7 +524,6 @@ class ImageRenamerApp:
                 self.profile.output_crop = clamped
                 self.crop_selected = True
                 self._redraw_regions()
-                self._invalidate_preview()
                 return
             self._create_field_from_rect(clamped)
             return
@@ -550,7 +548,6 @@ class ImageRenamerApp:
             self.profile.fields[target].rect = clamped
         self._redraw_regions()
         self._check_template_syntax()
-        self._invalidate_preview()
 
     def _reset_drag_state(self):
         self.canvas.delete("dragging")
@@ -581,13 +578,11 @@ class ImageRenamerApp:
         self.profile.fields.append(field)
         self._refresh_field_list()
         self._redraw_regions()
-        self._invalidate_preview()
 
     def _clear_output_crop(self):
         self.profile.output_crop = None
         self.crop_selected = False
         self._redraw_regions()
-        self._invalidate_preview()
 
     def _options_from_dialog(self, dialog: RegionDialog) -> dict:
         if dialog.result_type != "choice":
@@ -631,7 +626,6 @@ class ImageRenamerApp:
         self._refresh_field_list()
         self._redraw_regions()
         self._check_template_syntax()
-        self._invalidate_preview()
 
     def _delete_selected_field(self):
         if self.selected_field_index is None:
@@ -640,7 +634,6 @@ class ImageRenamerApp:
         self.selected_field_index = None
         self._refresh_field_list()
         self._redraw_regions()
-        self._invalidate_preview()
 
     def _insert_placeholder(self, _event):
         selection = self.insert_listbox.curselection()
@@ -717,7 +710,6 @@ class ImageRenamerApp:
         if not path:
             return
         self.profile.save(path)
-        self.preview_valid_for_profile = False
         messagebox.showinfo("Saved", f"Profile saved to {path}")
 
     def load_profile(self):
@@ -1059,15 +1051,6 @@ class ImageRenamerApp:
     def _update_apply_state(self):
         state = "normal" if self.preview_valid_for_profile and self.preview_rows else "disabled"
         self.apply_btn.config(state=state)
-
-    def _invalidate_preview(self):
-        """A field moved, resized, was added/removed/renamed, or the
-        pattern/collision strategy/crop area changed. Per spec, Apply must
-        not run against a preview computed before that change -- so require
-        a fresh Preview rather than silently reusing stale proposed names."""
-        if self.preview_valid_for_profile:
-            self.preview_valid_for_profile = False
-            self._update_apply_state()
 
     def run_apply(self):
         if not self.preview_valid_for_profile:
