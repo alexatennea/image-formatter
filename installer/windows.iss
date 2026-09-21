@@ -25,9 +25,13 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\ImageRenamer
 DefaultGroupName={#MyAppName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
-OutputDir=installer\output
+; Inno Setup resolves every relative path in this file (OutputDir,
+; SetupIconFile, Source below) relative to THIS SCRIPT'S OWN DIRECTORY
+; (installer\), not the working directory ISCC.exe was invoked from --
+; "installer\output" here would actually create installer\installer\output.
+OutputDir=output
 OutputBaseFilename=ImageRenamerSetup
-SetupIconFile=assets\icon.ico
+SetupIconFile=..\assets\icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -43,8 +47,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 ; Everything PyInstaller's --onedir build produced -- the .exe plus its
-; supporting _internal\ folder (the ONNX models, Tcl/Tk, etc.).
-Source: "dist\ImageRenamer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; supporting _internal\ folder (the ONNX models, Tcl/Tk, etc.). Relative
+; to this script's own directory (installer\), hence "..\dist\...".
+Source: "..\dist\ImageRenamer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
