@@ -60,8 +60,22 @@ antivirus interference during unpacking are the likely culprits, though it
 wasn't practical to pin down the exact mechanism on a machine we don't
 have direct access to. `--onedir` removes runtime unpacking entirely, so
 this whole class of failure is no longer possible regardless of the exact
-cause. The tradeoff is operators now get a folder to unzip rather than a
-single `.exe` -- documented below.
+cause.
+
+A onedir build's downside is that it's a folder rather than one file,
+which is exactly the download UX `--onefile` existed for. `installer/windows.iss`
+(built with [Inno Setup](https://jrsoftware.org/isinfo.php), Windows-only
+like everything else in this section) resolves that without bringing back
+the per-launch extraction risk: it packages the onedir output into a
+single installer `.exe` that installs once to `Program Files` with a
+Start Menu shortcut, rather than re-extracting on every run. The CI
+workflow signs *both* the app's own `.exe` inside the payload and the
+installer `.exe` that wraps it -- they're separate files and
+SmartScreen/Authenticode evaluate each independently, so only signing the
+inner one would still leave the installer itself showing as untrusted the
+moment someone runs it. Locally: `ISCC.exe installer\windows.iss
+/DMyAppVersion=1.0.0` (needs `dist\ImageRenamer\` already built, and Inno
+Setup installed).
 
 `--collect-data` is required or the bundled OCR models are omitted and the
 app fails at first extraction with a missing-file error. Windows takes
@@ -89,20 +103,20 @@ cross-compile).
 
 - **Every push to `main`**, and **manual run** (Actions tab -> pick the
   workflow -> Run workflow): the build is attached to that run as a
-  downloadable artifact (`ImageRenamer-windows`, a folder containing
-  `ImageRenamer.exe` alongside its supporting files -- run the `.exe` from
-  inside that folder, don't move it out on its own; `ImageRenamer-mac`,
-  containing the `ImageRenamer.app` bundle). GitHub always wraps a
-  workflow artifact in its own zip on download -- extract that once and
-  the folder/`.app` is right there; no second zip to unpack. Only the 3
-  most recent artifacts of each are kept; each workflow run prunes older
-  ones under the same name.
+  downloadable artifact -- `ImageRenamer-windows`, `ImageRenamerSetup.exe`
+  (the Inno Setup installer, a single file); `ImageRenamer-mac`, the
+  `ImageRenamer.app` bundle. GitHub always wraps a workflow artifact in
+  its own zip on download -- extract that once and the installer/`.app`
+  is right there; no second zip to unpack. Only the 3 most recent
+  artifacts of each are kept; each workflow run prunes older ones under
+  the same name.
 - **Release**: push a tag matching `v*.*.*` (e.g. `git tag v1.0.0 && git
   push origin v1.0.0`) and both workflows also attach a build to a GitHub
-  Release for that tag -- both zipped, since a Release asset has to be a
-  single file and neither the Windows folder nor the macOS `.app` is one
-  -- so others can download it from the Releases page without needing
-  repo access to Actions. Release assets are not pruned -- only the plain
+  Release for that tag -- the Windows installer `.exe` directly, the
+  macOS `.app` zipped since a Release asset has to be a single file and
+  the `.app` isn't one -- so others can download it from the Releases
+  page without needing repo access to Actions. Release assets are not
+  pruned -- only the plain
   workflow-run artifacts are.
 
 The Windows `.exe` is code-signed via Azure Trusted Signing (see below) --

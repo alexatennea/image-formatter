@@ -81,7 +81,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Sign executable (Azure Trusted Signing)
+      - name: Sign app executable (Azure Trusted Signing)
         uses: azure/trusted-signing-action@v0.5.1
         with:
           # This job's `environment: release` (above) is what makes the
@@ -99,30 +99,64 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      # Upload the raw onedir folder, not a zip of it: actions/upload-artifact
-      # already wraps whatever it's given in its own zip on download, so
-      # zipping it ourselves first would produce a zip-inside-a-zip that
-      # confuses extraction on download (the same issue hit on macOS
-      # earlier). Unlike macOS's .app, a Windows folder has no special
-      # naming Explorer needs to recognise it, so no extra care is needed
-      # here beyond that.
+      - name: Determine installer version
+        id: version
+        # Tags look like v1.2.3 -- Inno Setup wants just 1.2.3. Anything
+        # else (a push to main, a manual run) has no real version number,
+        # so use the run number to keep it unique and traceable instead.
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $version = "0.0.0-dev.${{ github.run_number }}"
+          }
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        # Wraps the signed --onedir payload into one installer .exe
+        # (Program Files install + Start Menu shortcut) via Inno Setup --
+        # this is what lets Windows users get "one file" to run/share
+        # without going back to PyInstaller's --onefile mode, which
+        # re-extracts its payload to a fresh temp folder on every launch
+        # (the likely cause of the OCR-corruption bug fixed by switching
+        # to --onedir in the first place).
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=${{ steps.version.outputs.version }}" `
+            installer\windows.iss
+
+      - name: Sign installer (Azure Trusted Signing)
+        # The installer is a separate binary from the app .exe inside it,
+        # and SmartScreen/Authenticode evaluate each file's signature
+        # independently -- signing only the inner app .exe would still
+        # leave the installer itself showing as unsigned/untrusted the
+        # moment someone double-clicks it to install.
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: ennealimited
+          certificate-profile-name: ennea
+          files-folder: ${{ github.workspace }}\installer\output
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - uses: actions/upload-artifact@v4
         with:
           name: ImageRenamer-windows
-          path: dist/ImageRenamer
-
-      - name: Package for release
-        # A GitHub Release asset has to be a single file, so the onedir
-        # folder needs zipping here -- but only here, for the release
-        # upload, not for the workflow artifact above.
-        if: startsWith(github.ref, 'refs/tags/')
-        run: Compress-Archive -Path dist/ImageRenamer -DestinationPath ImageRenamer-windows.zip
+          path: installer/output/ImageRenamerSetup.exe
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ImageRenamer-windows.zip
+          files: installer/output/ImageRenamerSetup.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
