@@ -47,8 +47,19 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Build executable
+        # No --onefile: a real-world report from an actual operator machine
+        # showed OCR output degrading into near-random characters (digits,
+        # symbols, even stray CJK glyphs) -- the character-dictionary
+        # mapping code was checked and is fine (explicit UTF-8 decode), so
+        # this points to the bundled ~100MB of ONNX model weights
+        # themselves getting corrupted. --onefile self-extracts that
+        # payload to a fresh temp folder on every single launch, which on
+        # Windows is exposed to legacy MAX_PATH truncation, antivirus
+        # interference during unpack, and general flakiness that --onedir
+        # (a plain directory run in place, no runtime unpacking) avoids
+        # entirely -- matching the same tradeoff already made for macOS.
         run: |
-          pyinstaller --onefile --windowed --name ImageRenamer `
+          pyinstaller --windowed --name ImageRenamer `
             --icon assets/icon.ico `
             --collect-data rapidocr_onnxruntime `
             --paths . `
@@ -82,28 +93,36 @@ jobs:
           endpoint: https://weu.codesigning.azure.net/
           trusted-signing-account-name: ennealimited
           certificate-profile-name: ennea
-          files-folder: ${{ github.workspace }}\dist
+          files-folder: ${{ github.workspace }}\dist\ImageRenamer
           files-folder-filter: exe
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      # Upload the raw .exe, not a zip of it: actions/upload-artifact
+      # Upload the raw onedir folder, not a zip of it: actions/upload-artifact
       # already wraps whatever it's given in its own zip on download, so
-      # zipping it ourselves first produced a zip-inside-a-zip that
-      # confused Archive Utility on extraction. A bare .exe is also a
-      # perfectly valid GitHub Release asset, so no zip is needed there
-      # either.
+      # zipping it ourselves first would produce a zip-inside-a-zip that
+      # confuses extraction on download (the same issue hit on macOS
+      # earlier). Unlike macOS's .app, a Windows folder has no special
+      # naming Explorer needs to recognise it, so no extra care is needed
+      # here beyond that.
       - uses: actions/upload-artifact@v4
         with:
           name: ImageRenamer-windows
-          path: dist/ImageRenamer.exe
+          path: dist/ImageRenamer
+
+      - name: Package for release
+        # A GitHub Release asset has to be a single file, so the onedir
+        # folder needs zipping here -- but only here, for the release
+        # upload, not for the workflow artifact above.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: Compress-Archive -Path dist/ImageRenamer -DestinationPath ImageRenamer-windows.zip
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/ImageRenamer.exe
+          files: ImageRenamer-windows.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -30,24 +30,38 @@ Build on the target OS -- PyInstaller does not cross-compile. The exact
 commands the CI workflows run are the source of truth (see below); roughly:
 
 ```bash
-# Windows
-pyinstaller --onefile --windowed --name ImageRenamer \
+# Windows -- no --onefile (as of the fix below), matching macOS.
+pyinstaller --windowed --name ImageRenamer \
   --icon assets/icon.ico \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
 
-# macOS -- no --onefile: PyInstaller warns that combining --onefile with
-# --windowed on macOS "clashes with macOS's security" and is slated to
-# become a hard error. --windowed alone still produces a proper .app
-# bundle; --onefile only controls whether its *internals* are one big
-# self-extracting binary or a plain directory of files.
+# macOS -- also no --onefile: PyInstaller warns that combining --onefile
+# with --windowed on macOS "clashes with macOS's security" and is slated
+# to become a hard error. --windowed alone still produces a proper .app
+# bundle either way.
 pyinstaller --windowed --name ImageRenamer \
   --icon assets/icon.icns \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
 ```
+
+Both platforms build in `--onedir` mode (a plain folder of files run in
+place), not `--onefile` (which bundles everything into one self-extracting
+binary that unpacks itself to a fresh temp folder on *every launch*).
+Windows originally used `--onefile` for the convenience of a single
+portable `.exe`, but a real operator machine hit OCR output degrading into
+near-random characters (digits, symbols, stray CJK glyphs) that pointed to
+the ~100MB of bundled ONNX model weights getting corrupted during that
+per-launch temp extraction -- legacy Windows `MAX_PATH` truncation and
+antivirus interference during unpacking are the likely culprits, though it
+wasn't practical to pin down the exact mechanism on a machine we don't
+have direct access to. `--onedir` removes runtime unpacking entirely, so
+this whole class of failure is no longer possible regardless of the exact
+cause. The tradeoff is operators now get a folder to unzip rather than a
+single `.exe` -- documented below.
 
 `--collect-data` is required or the bundled OCR models are omitted and the
 app fails at first extraction with a missing-file error. Windows takes
@@ -75,19 +89,21 @@ cross-compile).
 
 - **Every push to `main`**, and **manual run** (Actions tab -> pick the
   workflow -> Run workflow): the build is attached to that run as a
-  downloadable artifact (`ImageRenamer-windows`, containing
-  `ImageRenamer.exe`; `ImageRenamer-mac`, containing `ImageRenamer.app`).
-  GitHub always wraps a workflow artifact in its own zip on download --
-  extract that once and the `.exe`/`.app` is right there; no second zip to
-  unpack. Only the 3 most recent artifacts of each are kept; each workflow
-  run prunes older ones under the same name.
+  downloadable artifact (`ImageRenamer-windows`, a folder containing
+  `ImageRenamer.exe` alongside its supporting files -- run the `.exe` from
+  inside that folder, don't move it out on its own; `ImageRenamer-mac`,
+  containing the `ImageRenamer.app` bundle). GitHub always wraps a
+  workflow artifact in its own zip on download -- extract that once and
+  the folder/`.app` is right there; no second zip to unpack. Only the 3
+  most recent artifacts of each are kept; each workflow run prunes older
+  ones under the same name.
 - **Release**: push a tag matching `v*.*.*` (e.g. `git tag v1.0.0 && git
   push origin v1.0.0`) and both workflows also attach a build to a GitHub
-  Release for that tag (the Windows `.exe` directly, the macOS `.app`
-  zipped since a Release asset has to be a single file), so others can
-  download it from the Releases page without needing repo access to
-  Actions. Release assets are not pruned -- only the plain workflow-run
-  artifacts are.
+  Release for that tag -- both zipped, since a Release asset has to be a
+  single file and neither the Windows folder nor the macOS `.app` is one
+  -- so others can download it from the Releases page without needing
+  repo access to Actions. Release assets are not pruned -- only the plain
+  workflow-run artifacts are.
 
 The Windows `.exe` is code-signed via Azure Trusted Signing (see below) --
 SmartScreen reputation still builds up gradually after release, so early
