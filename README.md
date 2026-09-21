@@ -161,7 +161,31 @@ workflow.
 | `image_renamer/naming.py` | Template resolution, sanitisation, collisions | No |
 | `image_renamer/runner.py` | Folder scan, hashing, orchestration, manifest, undo | No |
 | `image_renamer/app.py` | Tkinter windows, canvas, dialogs, wiring | Yes |
+| `image_renamer/win_cpu_affinity.py` | Windows-only hybrid-CPU mitigation (see below) | No |
 
 `runner.preview(folder, profile)` and `runner.apply(rows, folder, profile)`
 are the only entry points the GUI calls into batch logic, plus
 `runner.undo_last_run(folder)`.
+
+### Hybrid-CPU (P-core/E-core) OCR mitigation
+
+An operator on a very new Intel Core Ultra 200-series ("Lunar Lake",
+hybrid Performance/Efficiency core) machine hit OCR output coming out as
+near-random characters on some fields of a batch but not others, with no
+crash -- consistent with individual inference calls landing on an
+Efficiency core whose instruction-set support differs subtly from the
+Performance cores (the same class of bug that led Intel to disable
+AVX-512 entirely on Alder Lake's launch: software assumed uniform
+instruction support across cores, E-cores didn't have it, results
+silently corrupted rather than crashing).
+
+`image_renamer/win_cpu_affinity.py` (`main()` in `app.py` calls it before
+creating the Tk root) is a best-effort mitigation: on Windows, it enumerates
+CPU sets via `GetSystemCpuSetInformation`, and if it finds more than one
+distinct `EfficiencyClass` (i.e. genuinely a hybrid CPU), restricts the
+whole process to the highest-class (Performance) cores via
+`SetProcessDefaultCpuSets`. No-op on non-Windows and on any non-hybrid
+CPU; every step fails silently (leaving the process unrestricted, exactly
+today's behaviour) rather than raising, since this couldn't be verified
+against real hybrid-CPU hardware -- it's an evidence-based hypothesis, not
+a confirmed fix.

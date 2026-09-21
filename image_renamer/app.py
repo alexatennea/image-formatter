@@ -1091,6 +1091,14 @@ class ImageRenamerApp:
 
 
 def main():
+    # Best-effort mitigation for a suspected hybrid-CPU (Performance/
+    # Efficiency core) numeric-correctness issue in onnxruntime on very
+    # new Intel chips -- see win_cpu_affinity.py. No-op on non-Windows,
+    # and safe to fail silently on any Windows version/CPU where it
+    # doesn't apply.
+    from image_renamer.win_cpu_affinity import pin_to_performance_cores
+    pin_to_performance_cores()
+
     root = tk.Tk()
     ImageRenamerApp(root)
     root.mainloop()
