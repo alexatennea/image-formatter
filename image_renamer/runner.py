@@ -26,6 +26,8 @@ STATUS_VALIDATION_FAILED = "VALIDATION_FAILED"
 STATUS_COLLISION_UNRESOLVED = "COLLISION_UNRESOLVED"
 STATUS_OK = "OK"
 STATUS_ALREADY_PROCESSED = "ALREADY_PROCESSED"
+STATUS_UNDONE = "UNDONE"
+"""Manifest-only status: the row was applied, then reverted by undo."""
 
 
 DEFAULT_CHOICE_OPTIONS = ["intact", "split"]
@@ -384,7 +386,9 @@ def undo_last_run(folder: str) -> UndoReport:
     report.manifest_path = manifest_path
 
     with open(manifest_path, newline="", encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
+        reader = csv.DictReader(fh)
+        fieldnames = reader.fieldnames or []
+        rows = list(reader)
 
     originals_dir = os.path.join(folder, ORIGINALS_SUBFOLDER)
 
@@ -415,7 +419,18 @@ def undo_last_run(folder: str) -> UndoReport:
             else:
                 os.rename(current_path, original_path)
             report.restored.append(original_name)
+            row["status"] = STATUS_UNDONE
         except OSError as exc:
             report.skipped.append((new_name, str(exc)))
+
+    # Record the undo in the manifest itself. Left as OK, these rows would
+    # keep their hashes in _previously_ok_hashes, so the restored files
+    # would come back as ALREADY_PROCESSED on the next Preview and could
+    # never be renamed again.
+    if report.restored:
+        with open(manifest_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
 
     return report

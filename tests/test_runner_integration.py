@@ -124,6 +124,10 @@ def test_preview_and_apply_and_manifest_and_undo(tmp_path, monkeypatch):
     assert (folder / "IMG_0002.jpg").exists()
     assert not (folder / "STAI_1001.jpg").exists()
 
+    # Undone files must be processable again, not stuck as ALREADY_PROCESSED.
+    rows3 = runner.preview(str(folder), profile)
+    assert all(r.status == runner.STATUS_OK for r in rows3)
+
 
 def test_layout_mismatch_row_not_extracted(tmp_path, monkeypatch):
     folder = tmp_path / "batch2"

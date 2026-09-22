@@ -65,3 +65,68 @@ def test_pattern_validates_checksum_style_field():
 
     bad = extract_and_validate_field("code", "text", "wrong", {"pattern": r"^\d+$"}, required=True)
     assert bad.status == FieldStatus.VALIDATION_FAILED
+
+
+def test_engine_is_built_with_detection_disabled(monkeypatch):
+    # RapidOCR swallows unknown kwargs, so a misspelt option name silently
+    # leaves text detection on and fragments every field into single-glyph
+    # garbage. Pin the exact kwargs the engine is constructed with.
+    import sys
+    import types
+
+    from image_renamer import extract
+
+    captured = {}
+
+    class FakeRapidOCR:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", types.SimpleNamespace(RapidOCR=FakeRapidOCR))
+    monkeypatch.setattr(extract, "_shared_engine", None)
+    extract._get_shared_engine()
+    assert captured.get("use_det") is False
+    assert "use_text_det" not in captured
+
+
+def test_ocr_engine_reads_both_result_shapes(monkeypatch):
+    from PIL import Image
+
+    from image_renamer import extract
+
+    blank = Image.new("L", (10, 10))
+    monkeypatch.setattr(extract, "_shared_engine", lambda _img: ([["LUMBER", 0.97]], None))
+    assert extract.ocr_engine(blank) == "LUMBER"
+    monkeypatch.setattr(extract, "_shared_engine", lambda _img: ([[[[0, 0]] * 4, "LUMBER", 0.97]], None))
+    assert extract.ocr_engine(blank) == "LUMBER"
+
+
+def test_concurrent_first_use_builds_one_engine(monkeypatch):
+    import sys
+    import threading
+    import time
+    import types
+
+    from PIL import Image
+
+    from image_renamer import extract
+
+    built = []
+
+    class SlowRapidOCR:
+        def __init__(self, **kwargs):
+            time.sleep(0.05)  # widen the race window
+            built.append(self)
+
+        def __call__(self, _img):
+            return [["X", 1.0]], None
+
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", types.SimpleNamespace(RapidOCR=SlowRapidOCR))
+    monkeypatch.setattr(extract, "_shared_engine", None)
+    blank = Image.new("L", (10, 10))
+    threads = [threading.Thread(target=extract.ocr_engine, args=(blank,)) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1

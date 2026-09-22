@@ -678,8 +678,9 @@ class ImageRenamerApp:
             preprocessed = extract.preprocess_for_ocr(crop)
             try:
                 raw = extract.ocr_engine(preprocessed)
-            except Exception:  # noqa: BLE001 - OCR engine may be unavailable in dev
-                raw = ""
+            except Exception as exc:  # noqa: BLE001 - surface, don't mask, engine failures
+                self.sample_name_var.set(f"OCR failed on {{{f.name}}}: {exc}")
+                return
             result = extract.extract_and_validate_field(f.name, f.type, raw, f.options, f.required)
             values[f.name] = result.value or f"<{f.name}>"
 
@@ -1091,14 +1092,6 @@ class ImageRenamerApp:
 
 
 def main():
-    # Best-effort mitigation for a suspected hybrid-CPU (Performance/
-    # Efficiency core) numeric-correctness issue in onnxruntime on very
-    # new Intel chips -- see win_cpu_affinity.py. No-op on non-Windows,
-    # and safe to fail silently on any Windows version/CPU where it
-    # doesn't apply.
-    from image_renamer.win_cpu_affinity import pin_to_performance_cores
-    pin_to_performance_cores()
-
     root = tk.Tk()
     ImageRenamerApp(root)
     root.mainloop()

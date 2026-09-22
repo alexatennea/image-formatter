@@ -7,6 +7,7 @@ installed.
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -138,27 +139,49 @@ def ocr_engine(image: Image.Image) -> str:
     tests) never require rapidocr_onnxruntime to be installed."""
     import numpy as np
 
-    engine = _get_shared_engine()
-    result, _elapse = engine(np.array(image))
+    array = np.array(image)
+    with _engine_lock:
+        engine = _get_shared_engine()
+        result, _elapse = engine(array)
     if not result:
         return ""
-    return " ".join(item[1] for item in result)
+    return " ".join(_result_text(item) for item in result)
+
+
+def _result_text(item) -> str:
+    """RapidOCR's result rows are [box, text, score] when its detection
+    stage ran, but just [text, score] when it was skipped (use_det=False,
+    as configured below). Accept both so a change in engine settings can't
+    silently turn every read into a type error or a score."""
+    return item[1] if len(item) == 3 else item[0]
 
 
 _shared_engine = None
+_engine_lock = threading.Lock()
+"""Serialises construction and use of the shared engine. The Template tab's
+Preview runs OCR on the Tk thread while a Run-tab Preview may be running on
+its worker thread; without this, both could race to build their own engine
+on first use, and RapidOCR makes no thread-safety promise for concurrent
+calls. Per-field inference is ~10ms, so the contention costs nothing
+noticeable."""
 
 
 def _get_shared_engine():
+    """Callers must hold _engine_lock."""
     global _shared_engine
     if _shared_engine is None:
         from rapidocr_onnxruntime import RapidOCR
 
-        # use_text_det=False: each crop is already exactly one field by
+        # use_det=False: each crop is already exactly one field by
         # construction (the operator drew the box around a single value),
         # so the engine's own text-detection stage only gets in the way --
         # observed to fragment bold/embossed digits into several tiny
         # boxes that recognise as garbage instead of reading the whole
-        # crop as the single line it is.
+        # crop as the single line it is. NB: RapidOCR silently accepts
+        # unknown keyword arguments, so a misspelt option (this was once
+        # `use_text_det`) leaves detection ON with no error -- producing
+        # the scattered single-glyph "0 D D S 2"-style reads that were
+        # previously blamed on hardware. test_extract pins the real name.
         #
         # text_score=0.0: the engine's own confidence gate silently drops
         # low-scoring-but-correct reads (a legible value scored ~0.5-0.8
@@ -167,7 +190,7 @@ def _get_shared_engine():
         # pattern, date parse) rather than trusted on the engine's
         # self-reported confidence, so that gate is redundant here and
         # only costs recall.
-        _shared_engine = RapidOCR(use_text_det=False, text_score=0.0)
+        _shared_engine = RapidOCR(use_det=False, text_score=0.0)
     return _shared_engine
 
 
