@@ -20,17 +20,16 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          # 3.11 rather than the newest CPython -- PyInstaller and the
-          # rapidocr-onnxruntime wheel tend to lag the latest release. The
+          # Exactly 3.12: the pinned numpy needs >=3.12 and the pinned
+          # rapidocr-onnxruntime needs <3.13 (see requirements.txt). The
           # python.org build actions/setup-python installs on macOS bundles
           # its own Tcl/Tk, so tkinter works without a separate brew step.
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-build.txt
 
       - name: Verify tkinter is available
         run: python -c "import tkinter; print('tkinter OK, Tk', tkinter.TkVersion)"

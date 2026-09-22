@@ -6,13 +6,13 @@ on-device via RapidOCR (ONNX). See the build spec for full rationale.
 
 ## Development
 
-Requires Python 3.11 or 3.12 (PyInstaller and the ONNX runtime wheel tend
-to lag the newest CPython release).
+Requires Python 3.12 exactly -- the pinned dependencies in
+`requirements.txt` need it (see the comment at the top of that file).
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-build.txt   # runtime pins + PyInstaller/pytest
 python -m image_renamer.app
 ```
 
@@ -30,14 +30,21 @@ Build on the target OS -- PyInstaller does not cross-compile. The exact
 commands the CI workflows run are the source of truth (see below); roughly:
 
 ```bash
-# Windows -- no --onefile (as of the fix below), matching macOS.
+# Windows, installed build -- --onedir output, wrapped by the installer.
 pyinstaller --windowed --name ImageRenamer \
   --icon assets/icon.ico \
   --collect-data rapidocr_onnxruntime \
   -p . \
   image_renamer/app.py
 
-# macOS -- also no --onefile: PyInstaller warns that combining --onefile
+# Windows, portable build -- one self-contained .exe (e.g. for a USB stick).
+pyinstaller --onefile --windowed --name ImageRenamerPortable \
+  --icon assets/icon.ico \
+  --collect-data rapidocr_onnxruntime \
+  -p . \
+  image_renamer/app.py
+
+# macOS -- no --onefile: PyInstaller warns that combining --onefile
 # with --windowed on macOS "clashes with macOS's security" and is slated
 # to become a hard error. --windowed alone still produces a proper .app
 # bundle either way.
@@ -48,34 +55,32 @@ pyinstaller --windowed --name ImageRenamer \
   image_renamer/app.py
 ```
 
-Both platforms build in `--onedir` mode (a plain folder of files run in
-place), not `--onefile` (which bundles everything into one self-extracting
-binary that unpacks itself to a fresh temp folder on *every launch*).
-Windows originally used `--onefile` for the convenience of a single
-portable `.exe`, but a real operator machine hit OCR output degrading into
-near-random characters (digits, symbols, stray CJK glyphs) that pointed to
-the ~100MB of bundled ONNX model weights getting corrupted during that
-per-launch temp extraction -- legacy Windows `MAX_PATH` truncation and
-antivirus interference during unpacking are the likely culprits, though it
-wasn't practical to pin down the exact mechanism on a machine we don't
-have direct access to. `--onedir` removes runtime unpacking entirely, so
-this whole class of failure is no longer possible regardless of the exact
-cause.
+The Windows CI build produces two signed downloads:
 
-A onedir build's downside is that it's a folder rather than one file,
-which is exactly the download UX `--onefile` existed for. `installer/windows.iss`
-(built with [Inno Setup](https://jrsoftware.org/isinfo.php), Windows-only
-like everything else in this section) resolves that without bringing back
-the per-launch extraction risk: it packages the onedir output into a
-single installer `.exe` that installs once to `Program Files` with a
-Start Menu shortcut, rather than re-extracting on every run. The CI
-workflow signs *both* the app's own `.exe` inside the payload and the
-installer `.exe` that wraps it -- they're separate files and
-SmartScreen/Authenticode evaluate each independently, so only signing the
-inner one would still leave the installer itself showing as untrusted the
-moment someone runs it. Locally: `ISCC.exe installer\windows.iss
-/DMyAppVersion=1.0.0` (needs `dist\ImageRenamer\` already built, and Inno
-Setup installed).
+- **`ImageRenamerSetup.exe`** (recommended for machines it's installed on):
+  `installer/windows.iss`, built with
+  [Inno Setup](https://jrsoftware.org/isinfo.php), packages the `--onedir`
+  output (a plain folder run in place) into a single installer that
+  installs to `Program Files` with a Start Menu shortcut. Starts quickly
+  and draws less antivirus attention, since nothing is unpacked at launch.
+  Locally: `ISCC.exe installer\windows.iss /DMyAppVersion=1.0.0` (needs
+  `dist\ImageRenamer\` already built, and Inno Setup installed).
+- **`ImageRenamerPortable.exe`**: a `--onefile` build that runs from
+  anywhere with no install, e.g. a USB stick. It unpacks itself to a temp
+  folder on every launch, so it starts a few seconds slower.
+
+CI signs every `.exe` it ships -- the app's own `.exe` inside the installer
+payload, the installer itself, and the portable `.exe` -- because
+SmartScreen/Authenticode evaluate each file's signature independently.
+
+Windows builds were briefly `--onedir`-only after operators saw OCR output
+degrade into near-random characters (digits, symbols, stray CJK glyphs),
+which was blamed first on `--onefile`'s per-launch unpacking and then on
+hybrid P-core/E-core Intel CPUs. Neither was the cause: `extract.py` passed
+RapidOCR a misspelt option (`use_text_det` instead of `use_det`), which it
+silently ignores, so its text-detection stage stayed on and split each
+field into single-glyph fragments. That affected every build type and OS
+equally, and is now fixed and covered by tests.
 
 `--collect-data` is required or the bundled OCR models are omitted and the
 app fails at first extraction with a missing-file error. Windows takes
@@ -161,31 +166,7 @@ workflow.
 | `image_renamer/naming.py` | Template resolution, sanitisation, collisions | No |
 | `image_renamer/runner.py` | Folder scan, hashing, orchestration, manifest, undo | No |
 | `image_renamer/app.py` | Tkinter windows, canvas, dialogs, wiring | Yes |
-| `image_renamer/win_cpu_affinity.py` | Windows-only hybrid-CPU mitigation (see below) | No |
 
 `runner.preview(folder, profile)` and `runner.apply(rows, folder, profile)`
 are the only entry points the GUI calls into batch logic, plus
 `runner.undo_last_run(folder)`.
-
-### Hybrid-CPU (P-core/E-core) OCR mitigation
-
-An operator on a very new Intel Core Ultra 200-series ("Lunar Lake",
-hybrid Performance/Efficiency core) machine hit OCR output coming out as
-near-random characters on some fields of a batch but not others, with no
-crash -- consistent with individual inference calls landing on an
-Efficiency core whose instruction-set support differs subtly from the
-Performance cores (the same class of bug that led Intel to disable
-AVX-512 entirely on Alder Lake's launch: software assumed uniform
-instruction support across cores, E-cores didn't have it, results
-silently corrupted rather than crashing).
-
-`image_renamer/win_cpu_affinity.py` (`main()` in `app.py` calls it before
-creating the Tk root) is a best-effort mitigation: on Windows, it enumerates
-CPU sets via `GetSystemCpuSetInformation`, and if it finds more than one
-distinct `EfficiencyClass` (i.e. genuinely a hybrid CPU), restricts the
-whole process to the highest-class (Performance) cores via
-`SetProcessDefaultCpuSets`. No-op on non-Windows and on any non-hybrid
-CPU; every step fails silently (leaving the process unrestricted, exactly
-today's behaviour) rather than raising, since this couldn't be verified
-against real hybrid-CPU hardware -- it's an evidence-based hypothesis, not
-a confirmed fix.

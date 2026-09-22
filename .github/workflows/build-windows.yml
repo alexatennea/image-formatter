@@ -29,15 +29,14 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          # 3.11 rather than the newest CPython -- PyInstaller and the
-          # rapidocr-onnxruntime wheel tend to lag the latest release.
-          python-version: "3.11"
+          # Exactly 3.12: the pinned numpy needs >=3.12 and the pinned
+          # rapidocr-onnxruntime needs <3.13 (see requirements.txt).
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-build.txt
 
       - name: Run tests
         # `python -m pytest` (not the bare `pytest` console script) so the
@@ -46,20 +45,28 @@ jobs:
         # doesn't add the repo root the way `-m` does.
         run: python -m pytest tests/ -q
 
-      - name: Build executable
-        # No --onefile: a real-world report from an actual operator machine
-        # showed OCR output degrading into near-random characters (digits,
-        # symbols, even stray CJK glyphs) -- the character-dictionary
-        # mapping code was checked and is fine (explicit UTF-8 decode), so
-        # this points to the bundled ~100MB of ONNX model weights
-        # themselves getting corrupted. --onefile self-extracts that
-        # payload to a fresh temp folder on every single launch, which on
-        # Windows is exposed to legacy MAX_PATH truncation, antivirus
-        # interference during unpack, and general flakiness that --onedir
-        # (a plain directory run in place, no runtime unpacking) avoids
-        # entirely -- matching the same tradeoff already made for macOS.
+      - name: Build executable (onedir, for the installer)
+        # --onedir: a plain folder run in place, which the installer below
+        # wraps. Starts faster than --onefile (no per-launch unpacking) and
+        # draws less antivirus attention. The portable build is next.
         run: |
           pyinstaller --windowed --name ImageRenamer `
+            --icon assets/icon.ico `
+            --collect-data rapidocr_onnxruntime `
+            --paths . `
+            image_renamer/app.py
+
+      - name: Build portable executable (onefile)
+        # A single self-contained .exe that runs from anywhere (e.g. a USB
+        # stick) with no install. It unpacks itself to a temp folder on
+        # each launch, so it starts a few seconds slower than the
+        # installed build. (--onefile was once dropped on suspicion of
+        # corrupting OCR output; the real cause was a misnamed RapidOCR
+        # option in extract.py, affecting every build type equally.)
+        # Distinct --name so its build/spec files don't collide with the
+        # onedir build's; lands at dist/ImageRenamerPortable.exe.
+        run: |
+          pyinstaller --onefile --windowed --name ImageRenamerPortable `
             --icon assets/icon.ico `
             --collect-data rapidocr_onnxruntime `
             --paths . `
@@ -99,6 +106,23 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Sign portable executable (Azure Trusted Signing)
+        # files-folder isn't searched recursively by default, so pointing
+        # it at dist\ signs only the top-level ImageRenamerPortable.exe,
+        # not the (already signed) dist\ImageRenamer\ folder beneath it.
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          azure-client-id: ${{ vars.AZURE_CLIENT_ID }}
+          endpoint: https://weu.codesigning.azure.net/
+          trusted-signing-account-name: ennealimited
+          certificate-profile-name: ennea
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
       - name: Determine installer version
         id: version
         # Tags look like v1.2.3 -- Inno Setup wants just 1.2.3. Anything
@@ -118,11 +142,8 @@ jobs:
       - name: Build installer
         # Wraps the signed --onedir payload into one installer .exe
         # (Program Files install + Start Menu shortcut) via Inno Setup --
-        # this is what lets Windows users get "one file" to run/share
-        # without going back to PyInstaller's --onefile mode, which
-        # re-extracts its payload to a fresh temp folder on every launch
-        # (the likely cause of the OCR-corruption bug fixed by switching
-        # to --onedir in the first place).
+        # the recommended option for machines it gets installed on; the
+        # portable onefile .exe covers running without installing.
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DMyAppVersion=${{ steps.version.outputs.version }}" `
@@ -152,33 +173,42 @@ jobs:
           name: ImageRenamer-windows
           path: installer/output/ImageRenamerSetup.exe
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImageRenamer-windows-portable
+          path: dist/ImageRenamerPortable.exe
+
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/output/ImageRenamerSetup.exe
+          files: |
+            installer/output/ImageRenamerSetup.exe
+            dist/ImageRenamerPortable.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Workflow artifacts (unlike Release assets) pile up forever
       # otherwise -- every push to main uploads a new one under the same
-      # name, so keep only the 3 most recent and delete the rest.
+      # name, so keep only the 3 most recent of each and delete the rest.
       - name: Prune old artifacts (keep newest 3)
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const artifactName = "ImageRenamer-windows";
+            const artifactNames = ["ImageRenamer-windows", "ImageRenamer-windows-portable"];
             const all = await github.paginate(
               github.rest.actions.listArtifactsForRepo,
               { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 },
             );
-            const matching = all
-              .filter((a) => a.name === artifactName)
-              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            for (const artifact of matching.slice(3)) {
-              console.log(`Deleting old artifact ${artifact.id} (${artifact.created_at})`);
-              await github.rest.actions.deleteArtifact({
-                owner: context.repo.owner, repo: context.repo.repo, artifact_id: artifact.id,
-              });
+            for (const artifactName of artifactNames) {
+              const matching = all
+                .filter((a) => a.name === artifactName)
+                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              for (const artifact of matching.slice(3)) {
+                console.log(`Deleting old artifact ${artifact.id} (${artifact.created_at})`);
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner, repo: context.repo.repo, artifact_id: artifact.id,
+                });
+              }
             }
