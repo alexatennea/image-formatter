@@ -32,6 +32,8 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 OutputDir=output
 OutputBaseFilename=ImageRenamerSetup
 SetupIconFile=..\assets\icon.ico
+; Shown as an "I accept" page during install.
+LicenseFile=..\LICENSE
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -50,6 +52,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 ; supporting _internal\ folder (the ONNX models, Tcl/Tk, etc.). Relative
 ; to this script's own directory (installer\), hence "..\dist\...".
 Source: "..\dist\ImageRenamer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

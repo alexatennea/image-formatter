@@ -182,9 +182,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          # LICENSE rides along as its own asset since the portable .exe and
+          # the macOS zip have nowhere to show it (the installer displays it
+          # during setup). Attached from this workflow only, so the two
+          # platform workflows don't race to upload the same asset name.
           files: |
             installer/output/ImageRenamerSetup.exe
             dist/ImageRenamerPortable.exe
+            LICENSE
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

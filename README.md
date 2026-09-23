@@ -170,3 +170,10 @@ workflow.
 `runner.preview(folder, profile)` and `runner.apply(rows, folder, profile)`
 are the only entry points the GUI calls into batch logic, plus
 `runner.undo_last_run(folder)`.
+
+## Licence
+
+Free to use, including commercially, and to share in unmodified form,
+under the custom [Image Batch Renamer Licence](LICENSE). Ennea Limited may
+revoke the licence at any time. Modifying or selling the software is not
+permitted. Bundled third-party components keep their own licences.

@@ -1,0 +1,115 @@
+Image Batch Renamer Licence
+Version 1.0
+
+Copyright (c) 2026 Ennea Limited. All rights reserved.
+
+This licence governs your use of Image Batch Renamer (the "Software"),
+including its source code, compiled executables, installers and
+documentation, as made available by Ennea Limited (the "Licensor"). By
+downloading, installing, copying or using the Software you agree to these
+terms. If you do not agree, do not use the Software.
+
+1. Grant of licence
+
+   Subject to these terms, the Licensor grants you a free-of-charge,
+   non-exclusive, non-transferable, non-sublicensable, worldwide and
+   revocable licence to:
+
+   (a) install and use the Software for any lawful purpose, including
+       commercial and internal business purposes; and
+
+   (b) make and distribute copies of the Software, but only in unmodified
+       form, free of charge, and accompanied by a complete copy of this
+       licence.
+
+2. Restrictions
+
+   Except as expressly permitted in section 1, you may not:
+
+   (a) modify, adapt, translate or create derivative works of the
+       Software;
+
+   (b) sell, rent, lease or otherwise charge any fee for the Software or
+       for any copy of it;
+
+   (c) remove, alter or obscure any copyright notice, licence text, name
+       or code signature included with the Software; or
+
+   (d) represent that the Software is your own work, or that you are
+       endorsed by or affiliated with the Licensor.
+
+   The availability of the source code does not grant any rights beyond
+   those set out in this licence.
+
+3. Revocation
+
+   (a) The Licensor may revoke this licence at any time, for any reason
+       or no reason, either for everyone or for any particular person or
+       organisation.
+
+   (b) Revocation takes effect when the Licensor gives notice of it,
+       either by publishing a notice in the Software's official
+       repository (https://github.com/alexatennea/image-formatter) or on
+       the Licensor's website, or by giving written notice (including by
+       email) to the affected licensee. A general notice may state a later
+       effective date.
+
+   (c) Revocation does not affect files you have already renamed or
+       processed with the Software before it took effect.
+
+4. Termination for breach
+
+   This licence ends automatically, without notice, if you breach any of
+   its terms.
+
+5. Effect of revocation or termination
+
+   When this licence is revoked or ends, you must stop using and
+   distributing the Software and, within 30 days, delete or destroy every
+   copy of it in your possession or control. Sections 2, 5, 6, 7, 8 and 9
+   survive the end of this licence.
+
+6. Third-party components
+
+   The Software includes or depends on third-party components (for
+   example Python, Tcl/Tk, Pillow, NumPy, OpenCV, ONNX Runtime,
+   RapidOCR and its bundled PaddleOCR models) that are licensed by their
+   own authors under their own terms. Those terms govern those components.
+   Nothing in this licence restricts rights you have under them, and the
+   Licensor's right of revocation applies only to the Licensor's own work.
+
+7. No warranty
+
+   The Software is provided "as is", without warranty of any kind, express
+   or implied, including warranties of satisfactory quality, fitness for a
+   particular purpose, accuracy and non-infringement. The Software renames
+   and may crop your files; you are responsible for checking its output
+   and for keeping backups of your data.
+
+8. Limitation of liability
+
+   To the maximum extent permitted by law, the Licensor will not be liable
+   to you for any loss or damage of any kind arising out of or in
+   connection with the Software or this licence, whether in contract, tort
+   (including negligence) or otherwise, including any loss of data,
+   profits, revenue, business or goodwill, or any indirect or
+   consequential loss. Nothing in this licence limits or excludes
+   liability for death or personal injury caused by negligence, for fraud
+   or fraudulent misrepresentation, or for any other liability that
+   cannot be limited or excluded by law.
+
+9. General
+
+   (a) The Licensor may publish updated versions of this licence. Your
+       continued use of the Software after an updated version is published
+       in the official repository means you accept it.
+
+   (b) If any provision of this licence is found to be unenforceable, the
+       rest of it remains in effect.
+
+   (c) This licence is governed by the law of England and Wales, and the
+       courts of England and Wales have exclusive jurisdiction over any
+       dispute arising out of or in connection with it.
+
+For permission to do anything this licence does not allow, contact
+Ennea Limited.
