@@ -17,7 +17,10 @@ from . import extract, geometry, naming
 from .profile import Profile
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp"}
-ORIGINALS_SUBFOLDER = "_originals"
+ORIGINALS_SUBFOLDER = "raw"
+LEGACY_ORIGINALS_SUBFOLDER = "_originals"
+"""Where runs before the rename to `raw/` kept cropped originals; undo
+still looks there so those older runs stay reversible."""
 
 STATUS_LAYOUT_MISMATCH = "LAYOUT_MISMATCH"
 STATUS_UNREADABLE = "UNREADABLE"
@@ -269,24 +272,30 @@ def recompute_row_filename(row: Row, profile: Profile, all_rows: list[Row], fold
     row.proposed_name = resolved
 
 
-def _apply_output_crop(src: str, dst: str, output_crop, originals_dir: str) -> None:
-    """Backs up the untouched original into `_originals/`, then saves a
-    cropped copy under the new name. Keeping the original is what makes
-    this reversible: once a crop is baked into saved pixels, the discarded
-    part of the frame cannot be recovered from the renamed file alone."""
+def _backup_original(src: str, originals_dir: str) -> str:
+    """Copies the untouched original into `raw/` before anything touches
+    it. Every applied file gets a backup, whether it is only renamed or
+    also cropped, so the folder always keeps the photos exactly as they
+    came off the camera."""
     os.makedirs(originals_dir, exist_ok=True)
-    original_name = os.path.basename(src)
-    backup_path = os.path.join(originals_dir, original_name)
+    backup_path = os.path.join(originals_dir, os.path.basename(src))
     if os.path.exists(backup_path):
         raise FileExistsError(f"{backup_path} already exists")
+    shutil.copy2(src, backup_path)
+    return backup_path
 
+
+def _save_output_crop(src: str, dst: str, output_crop) -> None:
+    """Saves a cropped copy of `src` under the new name, then removes
+    `src`. The caller must already have backed `src` up: once a crop is
+    baked into saved pixels, the discarded part of the frame cannot be
+    recovered from the renamed file alone."""
     image = extract.load_image(src)
     px_rect = geometry.profile_rect_to_pixels(output_crop, image.width, image.height)
     cropped_image = image.crop(px_rect)
 
     save_kwargs = {"quality": 95} if dst.lower().endswith((".jpg", ".jpeg")) else {}
     cropped_image.save(dst, **save_kwargs)
-    shutil.copy2(src, backup_path)
     os.remove(src)
 
 
@@ -311,6 +320,7 @@ def apply(rows: list[Row], folder: str, profile: Profile) -> Report:
         "profile_name",
         "timestamp_utc",
         "output_cropped",
+        "backed_up",
     ]
 
     originals_dir = os.path.join(folder, ORIGINALS_SUBFOLDER)
@@ -327,15 +337,24 @@ def apply(rows: list[Row], folder: str, profile: Profile) -> Report:
             dst = os.path.join(folder, row.proposed_name)
             error = ""
             cropped = False
+            backup_path = ""
             try:
                 if os.path.exists(dst):
                     raise FileExistsError(f"{dst} already exists")
+                backup_path = _backup_original(src, originals_dir)
                 if profile.output_crop is not None:
-                    _apply_output_crop(src, dst, profile.output_crop, originals_dir)
+                    _save_output_crop(src, dst, profile.output_crop)
                     cropped = True
                 else:
                     os.rename(src, dst)
             except OSError as exc:
+                # The original is still in place under its old name, so a
+                # backup made for this failed row is just a stray copy.
+                if backup_path and os.path.exists(src):
+                    try:
+                        os.remove(backup_path)
+                    except OSError:
+                        pass
                 error = str(exc)
                 report.failed.append((row, error))
             else:
@@ -349,6 +368,7 @@ def apply(rows: list[Row], folder: str, profile: Profile) -> Report:
                 "profile_name": profile.profile_name,
                 "timestamp_utc": timestamp.isoformat(),
                 "output_cropped": "yes" if cropped and not error else "no",
+                "backed_up": "yes" if backup_path and not error else "no",
             }
             for n in sorted(field_names_set):
                 manifest_row[f"extracted_{n}"] = row.extracted.get(n, "")
@@ -390,7 +410,10 @@ def undo_last_run(folder: str) -> UndoReport:
         fieldnames = reader.fieldnames or []
         rows = list(reader)
 
-    originals_dir = os.path.join(folder, ORIGINALS_SUBFOLDER)
+    originals_dirs = [
+        os.path.join(folder, ORIGINALS_SUBFOLDER),
+        os.path.join(folder, LEGACY_ORIGINALS_SUBFOLDER),
+    ]
 
     for row in rows:
         original_name = row.get("original_name", "")
@@ -400,6 +423,13 @@ def undo_last_run(folder: str) -> UndoReport:
         current_path = os.path.join(folder, new_name)
         original_path = os.path.join(folder, original_name)
         was_cropped = row.get("output_cropped") == "yes"
+        backup_path = next(
+            (p for p in (os.path.join(d, original_name) for d in originals_dirs) if os.path.exists(p)),
+            None,
+        )
+        # Manifests written before every run made a backup have no
+        # backed_up column; their plain renames were never copied to raw/.
+        was_backed_up = was_cropped or row.get("backed_up") == "yes"
 
         if not os.path.exists(current_path):
             report.skipped.append((new_name, "File no longer present under its renamed name"))
@@ -410,14 +440,17 @@ def undo_last_run(folder: str) -> UndoReport:
 
         try:
             if was_cropped:
-                backup_path = os.path.join(originals_dir, original_name)
-                if not os.path.exists(backup_path):
-                    report.skipped.append((new_name, "Backed-up original not found in _originals"))
+                if backup_path is None:
+                    report.skipped.append((new_name, f"Backed-up original not found in {ORIGINALS_SUBFOLDER}"))
                     continue
                 os.rename(backup_path, original_path)
                 os.remove(current_path)
             else:
                 os.rename(current_path, original_path)
+                # The renamed file was untouched, so the raw/ copy is an
+                # identical duplicate of what was just restored.
+                if was_backed_up and backup_path is not None:
+                    os.remove(backup_path)
             report.restored.append(original_name)
             row["status"] = STATUS_UNDONE
         except OSError as exc:

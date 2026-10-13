@@ -14,7 +14,7 @@ from typing import Optional
 from PIL import Image, ImageTk
 
 from image_renamer import extract, geometry, naming, runner
-from image_renamer.profile import Field, LayoutGuard, Profile, ProfileError, ReferenceImage, default_profiles_dir
+from image_renamer.profile import FIELD_NAME_RE, Field, LayoutGuard, Profile, ProfileError, ReferenceImage, default_profiles_dir
 
 MAX_DISPLAY_DIM = 900
 
@@ -149,16 +149,25 @@ class ImageRenamerApp:
         self.side = ttk.Frame(body)
 
         ttk.Label(self.side, text="Fields").pack(anchor="w")
-        self.field_listbox = tk.Listbox(self.side, height=12)
+        self.field_listbox = tk.Listbox(self.side, height=12, exportselection=False)
         self.field_listbox.pack(fill="x")
         self.field_listbox.bind("<<ListboxSelect>>", self._on_field_select)
+        self.field_listbox.bind("<Double-Button-1>", self._begin_inline_field_rename)
+        self.field_listbox.bind("<F2>", self._begin_inline_field_rename)
+        self._field_name_editor: Optional[ttk.Entry] = None
 
         field_btns = ttk.Frame(self.side)
         field_btns.pack(fill="x", pady=4)
-        ttk.Button(field_btns, text="Rename", command=self._rename_selected_field).pack(side="left")
+        ttk.Button(field_btns, text="Edit...", command=self._rename_selected_field).pack(side="left")
         ttk.Button(field_btns, text="Delete", command=self._delete_selected_field).pack(side="left", padx=4)
+        # A second row: four buttons on one line clip at the minimum window size.
+        order_btns = ttk.Frame(self.side)
+        order_btns.pack(fill="x")
+        ttk.Button(order_btns, text="Move up", command=lambda: self._move_selected_field(-1)).pack(side="left")
+        ttk.Button(order_btns, text="Move down", command=lambda: self._move_selected_field(1)).pack(side="left", padx=4)
         drag_hint = ttk.Label(
-            self.side, text="Drag a region's body to move it, a corner to resize it.",
+            self.side,
+            text="Double-click a field to rename it. Drag a region's body to move it, a corner to resize it.",
             foreground="#888", wraplength=300,
         )
         drag_hint.pack(anchor="w", pady=(2, 0))
@@ -177,7 +186,11 @@ class ImageRenamerApp:
         ttk.Button(self.side, text="Clear output crop", command=self._clear_output_crop).pack(anchor="w", pady=(2, 0))
         crop_hint = ttk.Label(
             self.side,
-            text="When set, every processed photo is saved cropped to this\narea under its new name; the untouched original is kept in\nan '_originals' subfolder.",
+            text=(
+                "When set, every processed photo is saved cropped to this area under its new name. "
+                "Whether cropped or only renamed, a copy of every original is always kept in a "
+                "'raw' subfolder."
+            ),
             foreground="#888", wraplength=300,
         )
         crop_hint.pack(anchor="w")
@@ -233,17 +246,26 @@ class ImageRenamerApp:
         top_bar = ttk.Frame(self.run_tab)
         top_bar.pack(side="top", fill="x", padx=4, pady=4)
         ttk.Button(top_bar, text="Choose folder", command=self.choose_folder).pack(side="left")
-        self.folder_var = tk.StringVar(value="")
-        ttk.Label(top_bar, textvariable=self.folder_var).pack(side="left", padx=8)
 
-        self.preview_btn = ttk.Button(top_bar, text="Preview", command=self.run_preview)
-        self.preview_btn.pack(side="left", padx=(20, 4))
-        self.cancel_btn = ttk.Button(top_bar, text="Cancel", command=self.cancel_preview, state="disabled")
-        self.cancel_btn.pack(side="left")
-        self.apply_btn = ttk.Button(top_bar, text="Apply", command=self.run_apply, state="disabled")
-        self.apply_btn.pack(side="left", padx=4)
+        # The action buttons are packed (right to left) before the folder
+        # path so pack gives them their space first. The path used to be a
+        # Label packed ahead of them, and a long OneDrive path pushed
+        # Preview/Apply/Undo off the edge of the window.
         self.undo_btn = ttk.Button(top_bar, text="Undo last run", command=self.run_undo)
-        self.undo_btn.pack(side="left")
+        self.undo_btn.pack(side="right")
+        self.apply_btn = ttk.Button(top_bar, text="Apply", command=self.run_apply, state="disabled")
+        self.apply_btn.pack(side="right", padx=4)
+        self.cancel_btn = ttk.Button(top_bar, text="Cancel", command=self.cancel_preview, state="disabled")
+        self.cancel_btn.pack(side="right")
+        self.preview_btn = ttk.Button(top_bar, text="Preview", command=self.run_preview)
+        self.preview_btn.pack(side="right", padx=(20, 4))
+
+        # A read-only Entry rather than a Label: it clips a long path
+        # instead of widening the bar, and the operator can still scroll
+        # or select it to see the whole thing.
+        self.folder_var = tk.StringVar(value="")
+        self.folder_entry = ttk.Entry(top_bar, textvariable=self.folder_var, state="readonly", width=10)
+        self.folder_entry.pack(side="left", fill="x", expand=True, padx=8)
 
         self.progress = ttk.Progressbar(self.run_tab, mode="determinate")
         self.progress.pack(fill="x", padx=4)
@@ -594,11 +616,19 @@ class ImageRenamerApp:
         return {"choices": choices, "default": choices[0]}
 
     def _refresh_field_list(self):
+        self._cancel_inline_field_rename()
         self.field_listbox.delete(0, tk.END)
         self.insert_listbox.delete(0, tk.END)
         for f in self.profile.fields:
             self.field_listbox.insert(tk.END, f"{f.name} ({f.type})")
             self.insert_listbox.insert(tk.END, f.name)
+        if self.selected_field_index is not None and self.selected_field_index < len(self.profile.fields):
+            self.field_listbox.selection_set(self.selected_field_index)
+            self.field_listbox.see(self.selected_field_index)
+        # The set of known fields just changed, so an "Unknown field"
+        # message from before (e.g. a placeholder typed before its region
+        # was drawn) may no longer be true.
+        self._check_template_syntax()
 
     def _on_field_select(self, _event):
         selection = self.field_listbox.curselection()
@@ -617,15 +647,89 @@ class ImageRenamerApp:
         if dialog.result_name != f.name and any(x.name == dialog.result_name for x in self.profile.fields):
             messagebox.showerror("Duplicate field", f"A field named {dialog.result_name!r} already exists.")
             return
-        old_name = f.name
-        f.name = dialog.result_name
+        if dialog.result_name != f.name and not self._set_field_name(f, dialog.result_name):
+            return
         f.type = dialog.result_type
         f.options = self._options_from_dialog(dialog)
-        if old_name != f.name:
-            self.pattern_var.set(self.pattern_var.get().replace(f"{{{old_name}}}", f"{{{f.name}}}"))
         self._refresh_field_list()
         self._redraw_regions()
-        self._check_template_syntax()
+
+    def _set_field_name(self, f: Field, new_name: str) -> bool:
+        """Renames a field and every {placeholder} for it in the pattern.
+        Shows an error and returns False if the name is taken or invalid."""
+        if any(x is not f and x.name == new_name for x in self.profile.fields):
+            messagebox.showerror("Duplicate field", f"A field named {new_name!r} already exists.")
+            return False
+        if not FIELD_NAME_RE.match(new_name):
+            messagebox.showerror(
+                "Invalid field name",
+                f"{new_name!r} must start with a letter and use only lowercase letters, digits and _.",
+            )
+            return False
+        old_name = f.name
+        f.name = new_name
+        self.pattern_var.set(self.pattern_var.get().replace(f"{{{old_name}}}", f"{{{new_name}}}"))
+        return True
+
+    def _begin_inline_field_rename(self, event=None):
+        """Edits a field's name in place, over its row in the list. Enter
+        or clicking away commits; Escape cancels."""
+        self._cancel_inline_field_rename()
+        if event is not None and event.type == tk.EventType.ButtonPress:
+            index = self.field_listbox.nearest(event.y)
+        elif self.selected_field_index is not None:
+            index = self.selected_field_index
+        else:
+            return "break"
+        if not (0 <= index < len(self.profile.fields)):
+            return "break"
+        bbox = self.field_listbox.bbox(index)
+        if bbox is None:
+            return "break"
+        self.selected_field_index = index
+        f = self.profile.fields[index]
+
+        x, y, _w, h = bbox
+        editor = ttk.Entry(self.field_listbox)
+        editor.insert(0, f.name)
+        editor.select_range(0, tk.END)
+        editor.place(x=x, y=y - 2, relwidth=1.0, width=-x, height=h + 4)
+        editor.focus_set()
+        self._field_name_editor = editor
+
+        def commit(_e=None):
+            if self._field_name_editor is not editor:
+                return
+            new_name = editor.get().strip().lower().replace(" ", "_")
+            self._cancel_inline_field_rename()
+            if new_name and new_name != f.name and self._set_field_name(f, new_name):
+                self._refresh_field_list()
+                self._redraw_regions()
+
+        editor.bind("<Return>", commit)
+        editor.bind("<FocusOut>", commit)
+        editor.bind("<Escape>", lambda _e: self._cancel_inline_field_rename())
+        return "break"
+
+    def _cancel_inline_field_rename(self):
+        editor, self._field_name_editor = self._field_name_editor, None
+        if editor is not None:
+            editor.destroy()
+
+    def _move_selected_field(self, offset: int):
+        """Reorders fields. The order is what the Fields list, the
+        placeholder list and the Run tab's columns all display."""
+        index = self.selected_field_index
+        if index is None:
+            return
+        target = index + offset
+        if not (0 <= target < len(self.profile.fields)):
+            return
+        fields = self.profile.fields
+        fields[index], fields[target] = fields[target], fields[index]
+        self.selected_field_index = target
+        self._refresh_field_list()
+        self._redraw_regions()
 
     def _delete_selected_field(self):
         if self.selected_field_index is None:
@@ -758,6 +862,9 @@ class ImageRenamerApp:
         if not folder:
             return
         self.folder_var.set(folder)
+        # Show the end of the path: the batch's own folder name is the
+        # part that tells one batch from the next.
+        self.folder_entry.xview_moveto(1.0)
         self.preview_valid_for_profile = False
         self._update_apply_state()
 

@@ -1,6 +1,7 @@
-"""Covers the output_crop feature: Apply saves a cropped copy under the new
-name while backing up the untouched original into `_originals/`, and Undo
-restores the original from that backup."""
+"""Covers the output_crop feature and the `raw/` backup: Apply always backs
+up the untouched original into `raw/` (cropped or not), saves a cropped
+copy under the new name when an output crop is set, and Undo restores the
+original from that backup."""
 from PIL import Image
 
 from image_renamer import extract, runner
@@ -75,7 +76,25 @@ def test_undo_restores_original_from_backup_when_cropped(tmp_path, monkeypatch):
         assert restored_img.size == (REF_WIDTH, REF_HEIGHT)
 
 
-def test_apply_without_output_crop_is_a_plain_rename(tmp_path, monkeypatch):
+def test_apply_without_output_crop_renames_and_still_backs_up(tmp_path, monkeypatch):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    Image.new("RGB", (REF_WIDTH, REF_HEIGHT), "green").save(folder / "IMG_0001.jpg")
+    original_bytes = (folder / "IMG_0001.jpg").read_bytes()
+
+    monkeypatch.setattr(extract, "ocr_engine", lambda image: "SAMPLEA")
+
+    profile = build_profile(output_crop=None)
+    rows = runner.preview(str(folder), profile)
+    runner.apply(rows, str(folder), profile)
+
+    assert runner.ORIGINALS_SUBFOLDER == "raw"
+    assert (folder / "SAMPLEA.jpg").read_bytes() == original_bytes
+    assert (folder / "raw" / "IMG_0001.jpg").read_bytes() == original_bytes
+    assert not (folder / "IMG_0001.jpg").exists()
+
+
+def test_undo_plain_rename_removes_the_raw_copy(tmp_path, monkeypatch):
     folder = tmp_path / "batch"
     folder.mkdir()
     Image.new("RGB", (REF_WIDTH, REF_HEIGHT), "green").save(folder / "IMG_0001.jpg")
@@ -86,5 +105,27 @@ def test_apply_without_output_crop_is_a_plain_rename(tmp_path, monkeypatch):
     rows = runner.preview(str(folder), profile)
     runner.apply(rows, str(folder), profile)
 
-    assert (folder / "SAMPLEA.jpg").exists()
-    assert not (folder / runner.ORIGINALS_SUBFOLDER).exists()
+    undo_report = runner.undo_last_run(str(folder))
+    assert undo_report.restored == ["IMG_0001.jpg"]
+    assert (folder / "IMG_0001.jpg").exists()
+    assert not (folder / "SAMPLEA.jpg").exists()
+    assert not (folder / "raw" / "IMG_0001.jpg").exists()
+
+
+def test_undo_still_finds_crops_backed_up_to_legacy_originals(tmp_path, monkeypatch):
+    folder = tmp_path / "batch"
+    folder.mkdir()
+    Image.new("RGB", (REF_WIDTH, REF_HEIGHT), "blue").save(folder / "IMG_0001.jpg")
+
+    monkeypatch.setattr(extract, "ocr_engine", lambda image: "SAMPLEA")
+
+    profile = build_profile(output_crop=(0.1, 0.1, 0.5, 0.5))
+    rows = runner.preview(str(folder), profile)
+    runner.apply(rows, str(folder), profile)
+    # Simulate a run made by an older build, which backed up to _originals/.
+    (folder / "raw").rename(folder / runner.LEGACY_ORIGINALS_SUBFOLDER)
+
+    undo_report = runner.undo_last_run(str(folder))
+    assert undo_report.restored == ["IMG_0001.jpg"]
+    with Image.open(folder / "IMG_0001.jpg") as restored_img:
+        assert restored_img.size == (REF_WIDTH, REF_HEIGHT)
