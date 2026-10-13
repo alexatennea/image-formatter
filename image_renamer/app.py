@@ -146,7 +146,31 @@ class ImageRenamerApp:
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
 
-        self.side = ttk.Frame(body)
+        # The side panel is taller than a windowed (non-fullscreen) layout,
+        # so it lives inside a scrollable canvas -- otherwise everything
+        # below the window's bottom edge is clipped and unreachable.
+        side_pane = ttk.Frame(body)
+        self._side_pane = side_pane
+        self._touchpad_dy = 0
+        self.side_canvas = tk.Canvas(side_pane, highlightthickness=0, borderwidth=0, yscrollincrement=20)
+        side_scroll = ttk.Scrollbar(side_pane, orient="vertical", command=self.side_canvas.yview)
+        self.side_canvas.configure(yscrollcommand=side_scroll.set)
+        side_scroll.pack(side="right", fill="y")
+        self.side_canvas.pack(side="left", fill="both", expand=True)
+        self.side = ttk.Frame(self.side_canvas)
+        self._side_window = self.side_canvas.create_window((0, 0), window=self.side, anchor="nw")
+        self.side_canvas.bind(
+            "<Configure>", lambda e: self.side_canvas.itemconfigure(self._side_window, width=e.width),
+        )
+        # Bound app-wide (not via <Enter>/<Leave>, which fire whenever the
+        # pointer crosses into a child widget); the handler itself checks
+        # the pointer is over this panel. Tk 9 on macOS sends trackpad
+        # scrolling as <TouchpadScroll> rather than <MouseWheel>.
+        self.root.bind_all("<MouseWheel>", self._on_side_mousewheel, add="+")
+        try:
+            self.root.bind_all("<TouchpadScroll>", self._on_side_touchpad, add="+")
+        except tk.TclError:
+            pass  # Tk 8.6 has no such event; trackpads arrive as <MouseWheel> there.
 
         ttk.Label(self.side, text="Fields").pack(anchor="w")
         self.field_listbox = tk.Listbox(self.side, height=12, exportselection=False)
@@ -234,7 +258,7 @@ class ImageRenamerApp:
         collision_combo.pack(fill="x")
 
         body.add(canvas_pane, weight=3)
-        body.add(self.side, weight=1)
+        body.add(side_pane, weight=1)
         # ttk.Panedwindow's pane options only support `weight` (unlike the
         # older tk.PanedWindow, `minsize` isn't available here) -- the
         # window-level root.minsize(...) is what keeps the whole layout
@@ -408,6 +432,40 @@ class ImageRenamerApp:
         wrap = max(100, event.width - 20)
         for label in self._wrap_labels:
             label.configure(wraplength=wrap)
+        self.side_canvas.configure(scrollregion=self.side_canvas.bbox("all"))
+
+    def _side_should_scroll(self, event) -> bool:
+        """True when the pointer is over the side panel (but not over a
+        listbox, which scrolls itself) and the panel has hidden content."""
+        try:
+            widget = self.root.winfo_containing(event.x_root, event.y_root)
+        except (KeyError, tk.TclError):
+            return False  # e.g. over a combobox popdown Tkinter doesn't wrap
+        if widget is None or isinstance(widget, tk.Listbox):
+            return False
+        if not str(widget).startswith(str(self._side_pane)):
+            return False
+        return self.side_canvas.yview() != (0.0, 1.0)
+
+    def _on_side_touchpad(self, event):
+        if not self._side_should_scroll(event):
+            return
+        # %D packs both axes: dx in the high 16 bits, dy in the low 16 (signed).
+        dy = event.delta & 0xFFFF
+        if dy >= 0x8000:
+            dy -= 0x10000
+        self._touchpad_dy += dy
+        units = int(self._touchpad_dy / 20)  # matches yscrollincrement
+        if units:
+            self._touchpad_dy -= units * 20
+            self.side_canvas.yview_scroll(-units, "units")
+
+    def _on_side_mousewheel(self, event):
+        if not event.delta or not self._side_should_scroll(event):
+            return
+        # Windows reports multiples of 120 per notch; macOS reports small deltas.
+        delta = event.delta / 120 if abs(event.delta) >= 120 else event.delta
+        self.side_canvas.yview_scroll(int(-delta) or (-1 if event.delta > 0 else 1), "units")
 
     HANDLE_SIZE = 8
 
