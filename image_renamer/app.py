@@ -7,13 +7,12 @@ import queue
 import threading
 import tkinter as tk
 from datetime import date
-from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
 from PIL import Image, ImageTk
 
-from image_renamer import extract, geometry, naming, runner
+from image_renamer import extract, geometry, naming, runner, settings
 from image_renamer.profile import FIELD_NAME_RE, Field, LayoutGuard, Profile, ProfileError, ReferenceImage, default_profiles_dir
 
 MAX_DISPLAY_DIM = 900
@@ -98,6 +97,7 @@ class ImageRenamerApp:
         self.worker_thread: Optional[threading.Thread] = None
         self.cancel_flag = threading.Event()
         self.progress_queue: "queue.Queue" = queue.Queue()
+        self.settings = settings.load()
 
         self._build_ui()
 
@@ -321,13 +321,25 @@ class ImageRenamerApp:
 
     # -- template tab logic ---------------------------------------------------
 
+    def _remember_dir(self, key: str, folder: str):
+        self.settings[key] = folder
+        settings.save(self.settings)
+
     def load_example_image(self):
+        # Example photos usually come from a batch folder, so fall back to
+        # the last batch when no example has been loaded before.
+        initial_dir = settings.nearest_existing_dir(
+            self.settings.get(settings.LAST_IMAGE_DIR) or self.settings.get(settings.LAST_FOLDER)
+        )
+        kwargs = {"initialdir": initial_dir} if initial_dir else {}
         path = filedialog.askopenfilename(
             title="Choose an example image",
             filetypes=[("Images", "*.jpg *.jpeg *.png *.tif *.tiff *.bmp *.webp")],
+            **kwargs,
         )
         if not path:
             return
+        self._remember_dir(settings.LAST_IMAGE_DIR, os.path.dirname(path))
         try:
             image = extract.load_image(path)
         except Exception as exc:  # noqa: BLE001
@@ -818,10 +830,13 @@ class ImageRenamerApp:
         messagebox.showinfo("Saved", f"Profile saved to {path}")
 
     def load_profile(self):
+        # Always the profiles folder, never the last batch folder: profiles
+        # are kept in one place, apart from the photos.
         default_dir = default_profiles_dir()
+        default_dir.mkdir(parents=True, exist_ok=True)
         path = filedialog.askopenfilename(
             title="Load profile",
-            initialdir=str(default_dir) if default_dir.exists() else str(Path.home()),
+            initialdir=str(default_dir),
             filetypes=[("Profile", "*.json")],
         )
         if not path:
@@ -844,24 +859,24 @@ class ImageRenamerApp:
     # -- run tab logic ---------------------------------------------------
 
     def choose_folder(self):
-        # Batches typically live next to (or ARE) the folder the example
-        # image was loaded from, so start the picker there rather than
-        # wherever the OS last remembers -- the operator can then usually
-        # just confirm the folder, or step up one level to a sibling batch.
-        initial_dir = None
-        current = self.folder_var.get()
-        if current and os.path.isdir(current):
-            initial_dir = os.path.dirname(current) or current
-        elif self.example_path:
-            initial_dir = os.path.dirname(self.example_path)
+        # Start at the last folder used, remembered across restarts, so the
+        # operator doesn't have to click back down a deep OneDrive path
+        # every time. Failing that, the example image's folder: batches
+        # typically live next to (or ARE) it.
+        initial_dir = settings.nearest_existing_dir(
+            self.folder_var.get() or self.settings.get(settings.LAST_FOLDER)
+        )
+        if initial_dir is None and self.example_path:
+            initial_dir = settings.nearest_existing_dir(os.path.dirname(self.example_path))
 
         kwargs = {"title": "Choose a folder of images"}
-        if initial_dir and os.path.isdir(initial_dir):
+        if initial_dir:
             kwargs["initialdir"] = initial_dir
         folder = filedialog.askdirectory(**kwargs)
         if not folder:
             return
         self.folder_var.set(folder)
+        self._remember_dir(settings.LAST_FOLDER, folder)
         # Show the end of the path: the batch's own folder name is the
         # part that tells one batch from the next.
         self.folder_entry.xview_moveto(1.0)
