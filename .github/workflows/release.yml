@@ -1,0 +1,104 @@
+name: Release
+
+# Every push to main builds and tests both platforms. When the commits
+# since the last vX.Y.Z tag include a feat, fix, perf or breaking change
+# (Conventional Commits -- see CONTRIBUTING.md), it also publishes the next
+# version as a GitHub Release with the installers attached. The release is
+# only created after both builds succeed, so a failed build never leaves a
+# half-empty release or a tag behind.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+# One release at a time, never cancelled midway: two quick merges must not
+# both compute the same next version. A queued run starts after the
+# current one has tagged, so it counts from the new tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.next.outputs.release }}
+      version: ${{ steps.next.outputs.version }}
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history and tags, to find the last release
+
+      - name: Work out the next version
+        id: next
+        run: python3 tools/conventional_commits.py next-release --github-output "$GITHUB_OUTPUT"
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: write
+      actions: write
+      id-token: write
+
+  macos:
+    needs: version
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    permissions:
+      contents: write
+      actions: write
+
+  publish:
+    needs: [version, windows, macos]
+    # A manual run from another branch still builds, but never releases.
+    if: needs.version.outputs.release == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write release notes
+        run: python3 tools/conventional_commits.py next-release --notes notes.md
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ImageRenamer-windows
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: ImageRenamer-windows-portable
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: ImageRenamer-mac-zip
+          path: assets
+
+      - name: Create the release
+        # Creating the release also creates its tag. A tag made with this
+        # workflow's token doesn't start the tag-triggered builds again,
+        # which is what we want: the builds above already made the assets.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes-file notes.md \
+            assets/ImageRenamerSetup.exe \
+            assets/ImageRenamerPortable.exe \
+            assets/ImageRenamer-mac.zip \
+            LICENSE

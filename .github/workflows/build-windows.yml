@@ -1,9 +1,17 @@
 name: Build Windows executable
 
 on:
+  # Pushes to main don't trigger this directly: release.yml calls it for
+  # every push to main, passing a version when that push makes a release,
+  # so each push builds once rather than once here and once there.
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (e.g. 1.3.0); empty for a dev build
+        type: string
+        default: ""
+  # A hand-pushed tag still builds and attaches to its own release.
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
   workflow_dispatch: {}
@@ -125,11 +133,14 @@ jobs:
 
       - name: Determine installer version
         id: version
-        # Tags look like v1.2.3 -- Inno Setup wants just 1.2.3. Anything
-        # else (a push to main, a manual run) has no real version number,
-        # so use the run number to keep it unique and traceable instead.
+        # release.yml passes the version it is releasing. Tags look like
+        # v1.2.3 -- Inno Setup wants just 1.2.3. Anything else (a push to
+        # main with nothing to release, a manual run) has no real version
+        # number, so use the run number to keep it unique and traceable.
         run: |
-          if ("${{ github.ref }}" -like "refs/tags/v*") {
+          if ("${{ inputs.version }}") {
+            $version = "${{ inputs.version }}"
+          } elseif ("${{ github.ref }}" -like "refs/tags/v*") {
             $version = "${{ github.ref_name }}".TrimStart("v")
           } else {
             $version = "0.0.0-dev.${{ github.run_number }}"
