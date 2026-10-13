@@ -1,0 +1,33 @@
+name: Commit messages
+
+# Every commit on a pull request, and its title, must be a Conventional
+# Commit (see CONTRIBUTING.md): release.yml reads them to decide the next
+# version. The title is checked too because a squash merge uses it as the
+# commit message that lands on main.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check the pull request title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: python3 tools/conventional_commits.py check-title "$TITLE"
+
+      - name: Check every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/conventional_commits.py check-range "$BASE..$HEAD"

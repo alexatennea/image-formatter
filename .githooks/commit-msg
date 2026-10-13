@@ -1,0 +1,13 @@
+#!/bin/sh
+# Rejects commit messages that aren't Conventional Commits, before the
+# commit is made. Enable once per clone with:
+#   git config core.hooksPath .githooks
+# The same check runs on every pull request, so this just catches it sooner.
+root=$(git rev-parse --show-toplevel)
+for py in python3 python "py -3"; do
+  if $py -c "" >/dev/null 2>&1; then
+    exec $py "$root/tools/conventional_commits.py" check-file "$1"
+  fi
+done
+echo "commit-msg hook: no Python found, skipping the Conventional Commits check" >&2
+exit 0

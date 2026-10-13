@@ -16,6 +16,18 @@ pip install -r requirements-build.txt   # runtime pins + PyInstaller/pytest
 python -m image_renamer.app
 ```
 
+## Commit messages
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org)
+(`feat: ...`, `fix: ...`, `chore: ...`), because releases are versioned
+from them. Enable the hook that checks this as you commit, once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules.
+
 ## Tests
 
 Unit tests need no display and no OCR install:
@@ -100,29 +112,32 @@ attempted relative import with no known parent package`. This only shows up
 in the frozen build, not in normal `python -m image_renamer.app` runs, so
 it's easy to miss locally.
 
-### CI builds
+### CI builds and releases
 
-`.github/workflows/build-windows.yml` and `.github/workflows/build-macos.yml`
-each run tests then build on their native OS (PyInstaller doesn't
-cross-compile).
+`.github/workflows/release.yml` runs on **every push to `main`**. It calls
+`build-windows.yml` and `build-macos.yml`, which each run the tests and
+then build on their native OS (PyInstaller doesn't cross-compile).
 
-- **Every push to `main`**, and **manual run** (Actions tab -> pick the
-  workflow -> Run workflow): the build is attached to that run as a
-  downloadable artifact -- `ImageRenamer-windows`, `ImageRenamerSetup.exe`
-  (the Inno Setup installer, a single file); `ImageRenamer-mac`, the
-  `ImageRenamer.app` bundle. GitHub always wraps a workflow artifact in
+- **Every build** is attached to its run as a downloadable artifact:
+  `ImageRenamer-windows` (`ImageRenamerSetup.exe`, the Inno Setup
+  installer), `ImageRenamer-windows-portable` and `ImageRenamer-mac` (the
+  `ImageRenamer.app` bundle). GitHub always wraps a workflow artifact in
   its own zip on download -- extract that once and the installer/`.app`
-  is right there; no second zip to unpack. Only the 3 most recent
-  artifacts of each are kept; each workflow run prunes older ones under
-  the same name.
-- **Release**: push a tag matching `v*.*.*` (e.g. `git tag v1.0.0 && git
-  push origin v1.0.0`) and both workflows also attach a build to a GitHub
-  Release for that tag -- the Windows installer `.exe` directly, the
-  macOS `.app` zipped since a Release asset has to be a single file and
-  the `.app` isn't one -- so others can download it from the Releases
-  page without needing repo access to Actions. Release assets are not
-  pruned -- only the plain
-  workflow-run artifacts are.
+  is right there. Only the 3 most recent artifacts of each are kept.
+- **Releases are automatic.** Versions come from the commit messages
+  (Conventional Commits, see [CONTRIBUTING.md](CONTRIBUTING.md)) since the
+  last `vX.Y.Z` tag: a `feat:` makes a minor release (1.2.0 -> 1.3.0), a
+  `fix:` or `perf:` a patch release (1.2.0 -> 1.2.1), and a breaking
+  change (`feat!:` or a `BREAKING CHANGE:` footer) a major one (-> 2.0.0).
+  `chore:`, `docs:`, `ci:`, `refactor:`, `test:` and the rest still build
+  but don't release. Once both builds pass, the workflow creates the tag
+  and a GitHub Release with notes grouped from those commits, and
+  attaches the Windows installer, the portable `.exe`, the macOS `.app`
+  (zipped, since a Release asset has to be a single file) and `LICENSE`.
+  Release assets are never pruned.
+- **Manual run** (Actions tab -> Release -> Run workflow) does the same
+  for the current `main`. A hand-pushed `v*.*.*` tag also still builds and
+  attaches to its own release, but isn't needed any more.
 
 The Windows `.exe` is code-signed via Azure Trusted Signing (see below) --
 SmartScreen reputation still builds up gradually after release, so early

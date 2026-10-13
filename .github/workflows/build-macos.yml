@@ -1,9 +1,17 @@
 name: Build macOS app
 
 on:
+  # Pushes to main don't trigger this directly: release.yml calls it for
+  # every push to main, passing a version when that push makes a release,
+  # so each push builds once rather than once here and once there.
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (e.g. 1.3.0); empty for a dev build
+        type: string
+        default: ""
+  # A hand-pushed tag still builds and attaches to its own release.
   push:
-    branches:
-      - main
     tags:
       - "v*.*.*"
   workflow_dispatch: {}
@@ -85,8 +93,20 @@ jobs:
         # release upload, not for the workflow artifact above. ditto
         # (rather than the `zip` command) preserves the bundle's resource
         # forks and metadata correctly.
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.version
         run: ditto -c -k --sequesterRsrc --keepParent dist/ImageRenamer.app ImageRenamer-mac.zip
+
+      - name: Hand the zip to release.yml
+        # release.yml publishes the release once every build has passed.
+        # It needs this zip, made here by ditto, rather than zipping the
+        # ImageRenamer-mac artifact itself: artifact uploads drop the
+        # symlinks and permissions inside the .app bundle.
+        if: inputs.version
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageRenamer-mac-zip
+          path: ImageRenamer-mac.zip
+          retention-days: 7
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
